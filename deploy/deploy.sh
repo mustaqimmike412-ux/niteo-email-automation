@@ -8,8 +8,8 @@ set -e
 
 APP_NAME="email_automation"
 APP_DIR="/var/www/${APP_NAME}"
-DOMAIN="${DOMAIN:-your-domain.com}"
-GITHUB_REPO="${GITHUB_REPO:-https://github.com/yourusername/niteo-email-automation.git}"
+DOMAIN="${DOMAIN:-exim-flow.com}"
+GITHUB_REPO="${GITHUB_REPO:-https://github.com/mustaqimmike412-ux/niteo-email-automation.git}"
 
 echo "=========================================="
 echo " Niteo Solar 邮件自动化系统部署脚本"
