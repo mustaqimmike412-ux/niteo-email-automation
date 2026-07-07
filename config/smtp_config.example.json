@@ -1,0 +1,12 @@
+{
+    "smtp_server": "smtp.qiye.aliyun.com",
+    "smtp_port": 465,
+    "username": "travis@niteowork.com",
+    "password": "YOUR_APP_PASSWORD_HERE",
+    "sender_name": "travis",
+    "sender_email": "travis@niteowork.com",
+    "use_tls": false,
+    "use_ssl": true,
+    "daily_limit": 50,
+    "send_interval": 30
+}

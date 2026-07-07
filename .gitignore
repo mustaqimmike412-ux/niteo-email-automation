@@ -1,0 +1,71 @@
+# SQLite 数据库（含敏感数据）
+database/email_automation.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 配置文件（含密码）
+config/smtp_config.json
+config/imap_config.json
+config/llm_config.json
+config/search_config.json
+config/scheduler_config.json
+config/company_info.json
+
+# 环境变量
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志
+*.log
+logs/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 备份文件
+*.backup
+*.bak
+backups/
+
+# 测试文件
+tests/scripts/
+
+# 临时文件
+tmp/
+temp/
