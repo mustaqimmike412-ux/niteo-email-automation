@@ -104,7 +104,7 @@ def check_duplicate_customer_name(name, exclude_id=None, user_id=None):
     if exclude_id:
         if user_id:
             cursor.execute(
-                "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?) AND id != ? AND (user_id = ? OR user_id IS NULL)",
+                "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?) AND id != ? AND user_id = ?",
                 (name.strip(), exclude_id, user_id)
             )
         else:
@@ -115,7 +115,7 @@ def check_duplicate_customer_name(name, exclude_id=None, user_id=None):
     else:
         if user_id:
             cursor.execute(
-                "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?) AND (user_id = ? OR user_id IS NULL)",
+                "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?) AND user_id = ?",
                 (name.strip(), user_id)
             )
         else:
@@ -144,7 +144,7 @@ def check_duplicate_email(email, customer_id=None, user_id=None):
     if customer_id:
         if user_id:
             cursor.execute(
-                "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?) AND customer_id = ? AND (user_id = ? OR user_id IS NULL)",
+                "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?) AND customer_id = ? AND user_id = ?",
                 (email.strip().lower(), customer_id, user_id)
             )
         else:
@@ -155,7 +155,7 @@ def check_duplicate_email(email, customer_id=None, user_id=None):
     else:
         if user_id:
             cursor.execute(
-                "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?) AND (user_id = ? OR user_id IS NULL)",
+                "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?) AND user_id = ?",
                 (email.strip().lower(), user_id)
             )
         else:

@@ -109,7 +109,7 @@ def get_bounce_stats(user_id: int = None, admin: bool = False) -> dict:
         user_where = ""
         user_params = []
         if not admin and user_id:
-            user_where = " AND (user_id = ? OR user_id IS NULL)"
+            user_where = " AND user_id = ?"
             user_params = [user_id]
 
         # 总退信
@@ -132,7 +132,7 @@ def get_bounce_stats(user_id: int = None, admin: bool = False) -> dict:
         sent_where = ""
         sent_params = []
         if not admin and user_id:
-            sent_where = " AND (user_id = ? OR user_id IS NULL)"
+            sent_where = " AND user_id = ?"
             sent_params = [user_id]
         cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent'{sent_where}", sent_params)
         total_sent = cursor.fetchone()[0]

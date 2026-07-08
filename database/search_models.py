@@ -58,7 +58,7 @@ def get_search_task(task_id: str, user_id: int = None, admin: bool = False) -> O
     conn = get_connection()
     cursor = conn.cursor()
     if not admin and user_id:
-        cursor.execute('SELECT * FROM search_tasks WHERE task_id = ? AND (user_id = ? OR user_id IS NULL)', (task_id, user_id))
+        cursor.execute('SELECT * FROM search_tasks WHERE task_id = ? AND user_id = ?', (task_id, user_id))
     else:
         cursor.execute('SELECT * FROM search_tasks WHERE task_id = ?', (task_id,))
     row = cursor.fetchone()
@@ -79,7 +79,7 @@ def get_search_tasks(status: str = None, page: int = 1, per_page: int = 20, user
         conditions.append('status = ?')
         params.append(status)
     if not admin and user_id:
-        conditions.append('(user_id = ? OR user_id IS NULL)')
+        conditions.append('user_id = ?')
         params.append(user_id)
 
     where_clause = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
@@ -230,7 +230,7 @@ def get_search_results(task_id: str = None, status: str = None, platform: str = 
         conditions.append('company_name LIKE ?')
         params.append(f'%{search_keyword}%')
     if not admin and user_id:
-        conditions.append('(user_id = ? OR user_id IS NULL)')
+        conditions.append('user_id = ?')
         params.append(user_id)
 
     where_clause = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
@@ -262,7 +262,7 @@ def get_search_result(result_id: int, user_id: int = None, admin: bool = False) 
     conn = get_connection()
     cursor = conn.cursor()
     if not admin and user_id:
-        cursor.execute('SELECT * FROM search_results WHERE id = ? AND (user_id = ? OR user_id IS NULL)', (result_id, user_id))
+        cursor.execute('SELECT * FROM search_results WHERE id = ? AND user_id = ?', (result_id, user_id))
     else:
         cursor.execute('SELECT * FROM search_results WHERE id = ?', (result_id,))
     row = cursor.fetchone()
@@ -594,7 +594,7 @@ def remove_blacklist(company_name: str, website: str = '', user_id: int = None, 
     try:
         if not admin and user_id:
             conn.execute(
-                'DELETE FROM blacklisted_companies WHERE company_name = ? AND (website = ? OR website = \'\') AND (user_id = ? OR user_id IS NULL)',
+                'DELETE FROM blacklisted_companies WHERE company_name = ? AND (website = ? OR website = \'\') AND user_id = ?',
                 (company_name, website, user_id)
             )
         else:
@@ -617,7 +617,7 @@ def is_blacklisted(company_name: str = '', website: str = '', user_id: int = Non
         user_where = ''
         user_params = []
         if not admin and user_id:
-            user_where = ' AND (user_id = ? OR user_id IS NULL)'
+            user_where = ' AND user_id = ?'
             user_params = [user_id]
         # 按域名精确匹配
         if website:
@@ -667,7 +667,7 @@ def get_blacklist(page: int = 1, per_page: int = 20, user_id: int = None, admin:
         user_where = ''
         user_params = []
         if not admin and user_id:
-            user_where = ' WHERE (user_id = ? OR user_id IS NULL)'
+            user_where = ' WHERE user_id = ?'
             user_params = [user_id]
         total = conn.execute(f'SELECT COUNT(*) FROM blacklisted_companies{user_where}', user_params).fetchone()[0]
         rows = conn.execute(

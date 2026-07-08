@@ -13,7 +13,7 @@ class EmailFilter:
     def __init__(self, config=None):
         self.config = config or {}
 
-    def filter_customers(self, config=None):
+    def filter_customers(self, config=None, user_id=None, admin=False):
         """
         根据筛选规则获取待发送的客户及其邮箱列表
 
@@ -29,6 +29,8 @@ class EmailFilter:
                 - daily_limit: int - 每日发送上限
                 - limit: int - 返回结果上限，默认200
                 - order_by: str - 排序方式: 'default'/'unsent_first'/'recent_sent'
+            user_id: 当前用户 ID（数据隔离）
+            admin: 是否为管理员
 
         Returns:
             list[dict]: 待发送的邮件列表
@@ -52,9 +54,12 @@ class EmailFilter:
         search_keyword = self.config.get('search_keyword', '')
         order_by = self.config.get('order_by', 'default')
 
-        # 检查今日已发送数量
+        # 检查今日已发送数量（按用户隔离）
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
-        cursor.execute('SELECT COUNT(*) FROM email_logs WHERE sent_at >= ?', (today_start,))
+        if not admin and user_id:
+            cursor.execute('SELECT COUNT(*) FROM email_logs WHERE sent_at >= ? AND user_id = ?', (today_start, user_id))
+        else:
+            cursor.execute('SELECT COUNT(*) FROM email_logs WHERE sent_at >= ?', (today_start,))
         today_sent = cursor.fetchone()[0]
         remaining = max(0, daily_limit - today_sent)
 
@@ -69,6 +74,13 @@ class EmailFilter:
             'e.email_address != ""',
         ]
         params = []
+
+        # 数据隔离：只查询当前用户的客户和邮箱
+        if not admin and user_id:
+            conditions.append('c.user_id = ?')
+            params.append(user_id)
+            conditions.append('e.user_id = ?')
+            params.append(user_id)
 
         # 冷却期逻辑：排除在冷却期内已发送过的客户（排除手动解除的）
         # 但如果 send_status='sent' 或 'failed'，则不应用冷却期（用于查看已发送/失败的记录）
@@ -171,18 +183,28 @@ class EmailFilter:
 
         return results
 
-    def get_customer_emails(self, customer_id):
+    def get_customer_emails(self, customer_id, user_id=None, admin=False):
         """获取指定客户的所有邮箱"""
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT e.id, e.email_address, e.email_type, e.contact_name, e.job_title, e.is_active,
-                   (SELECT COUNT(*) FROM email_logs el WHERE el.email_id = e.id AND el.send_status = 'sent') as sent_count,
-                   (SELECT MAX(sent_at) FROM email_logs el WHERE el.email_id = e.id) as last_sent
-            FROM emails e
-            WHERE e.customer_id = ?
-            ORDER BY e.email_type, e.id
-        ''', (customer_id,))
+        if not admin and user_id:
+            cursor.execute('''
+                SELECT e.id, e.email_address, e.email_type, e.contact_name, e.job_title, e.is_active,
+                       (SELECT COUNT(*) FROM email_logs el WHERE el.email_id = e.id AND el.send_status = 'sent') as sent_count,
+                       (SELECT MAX(sent_at) FROM email_logs el WHERE el.email_id = e.id) as last_sent
+                FROM emails e
+                WHERE e.customer_id = ? AND e.user_id = ?
+                ORDER BY e.email_type, e.id
+            ''', (customer_id, user_id))
+        else:
+            cursor.execute('''
+                SELECT e.id, e.email_address, e.email_type, e.contact_name, e.job_title, e.is_active,
+                       (SELECT COUNT(*) FROM email_logs el WHERE el.email_id = e.id AND el.send_status = 'sent') as sent_count,
+                       (SELECT MAX(sent_at) FROM email_logs el WHERE el.email_id = e.id) as last_sent
+                FROM emails e
+                WHERE e.customer_id = ?
+                ORDER BY e.email_type, e.id
+            ''', (customer_id,))
         rows = cursor.fetchall()
         conn.close()
         return [{

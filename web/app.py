@@ -117,6 +117,7 @@ from database.api_config_models import (
     init_default_configs
 )
 from database.bounce_service import get_bounce_stats, get_bounce_list
+from database.user_settings_models import get_user_setting, save_user_setting, get_all_user_settings
 from web.auth import auth_bp, init_oauth, login_required, admin_required
 
 app = Flask(__name__, static_folder='dashboard', static_url_path='')
@@ -206,7 +207,7 @@ def api_stats():
         user_where = ""
         user_params = []
         if not admin and current_user_id:
-            user_where = " AND (user_id = ? OR user_id IS NULL)"
+            user_where = " AND user_id = ?"
             user_params = [current_user_id]
 
         # 今日发送
@@ -340,7 +341,7 @@ def api_customer_countries():
         user_where = ""
         user_params = []
         if not admin and current_user_id:
-            user_where = " AND (user_id = ? OR user_id IS NULL)"
+            user_where = " AND user_id = ?"
             user_params = [current_user_id]
 
         cursor.execute(f'''
@@ -372,7 +373,7 @@ def api_customer_detail(customer_id):
 
         # 客户基本信息
         if not admin and current_user_id:
-            cursor.execute('SELECT id, customer_name, country, address, website, company_info, industry_type, website_title, website_description FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)', (customer_id, current_user_id))
+            cursor.execute('SELECT id, customer_name, country, address, website, company_info, industry_type, website_title, website_description FROM customers WHERE id = ? AND user_id = ?', (customer_id, current_user_id))
         else:
             cursor.execute('SELECT id, customer_name, country, address, website, company_info, industry_type, website_title, website_description FROM customers WHERE id = ?', (customer_id,))
         row = cursor.fetchone()
@@ -387,15 +388,26 @@ def api_customer_detail(customer_id):
         }
         
         # 联系人和邮箱
-        cursor.execute('''
-            SELECT e.id, e.email_address, e.email_type, e.is_active, 
-                   COALESCE(e.contact_name, co.contact_name) as contact_name,
-                   COALESCE(e.job_title, co.job_title) as job_title
-            FROM emails e
-            LEFT JOIN contacts co ON e.contact_id = co.id
-            WHERE e.customer_id = ?
-            ORDER BY e.email_type, e.id
-        ''', (customer_id,))
+        if not admin and current_user_id:
+            cursor.execute('''
+                SELECT e.id, e.email_address, e.email_type, e.is_active, 
+                       COALESCE(e.contact_name, co.contact_name) as contact_name,
+                       COALESCE(e.job_title, co.job_title) as job_title
+                FROM emails e
+                LEFT JOIN contacts co ON e.contact_id = co.id
+                WHERE e.customer_id = ? AND e.user_id = ?
+                ORDER BY e.email_type, e.id
+            ''', (customer_id, current_user_id))
+        else:
+            cursor.execute('''
+                SELECT e.id, e.email_address, e.email_type, e.is_active, 
+                       COALESCE(e.contact_name, co.contact_name) as contact_name,
+                       COALESCE(e.job_title, co.job_title) as job_title
+                FROM emails e
+                LEFT JOIN contacts co ON e.contact_id = co.id
+                WHERE e.customer_id = ?
+                ORDER BY e.email_type, e.id
+            ''', (customer_id,))
         
         emails = [{
             'id': r[0], 'address': r[1], 'type': r[2], 'active': r[3],
@@ -403,26 +415,44 @@ def api_customer_detail(customer_id):
         } for r in cursor.fetchall()]
         
         # 发送历史
-        cursor.execute('''
-            SELECT el.email_subject, el.send_status, el.sent_at, e.email_address
-            FROM email_logs el
-            JOIN emails e ON el.email_id = e.id
-            WHERE el.customer_id = ?
-            ORDER BY el.sent_at DESC
-            LIMIT 20
-        ''', (customer_id,))
+        if not admin and current_user_id:
+            cursor.execute('''
+                SELECT el.email_subject, el.send_status, el.sent_at, e.email_address
+                FROM email_logs el
+                JOIN emails e ON el.email_id = e.id
+                WHERE el.customer_id = ? AND el.user_id = ?
+                ORDER BY el.sent_at DESC
+                LIMIT 20
+            ''', (customer_id, current_user_id))
+        else:
+            cursor.execute('''
+                SELECT el.email_subject, el.send_status, el.sent_at, e.email_address
+                FROM email_logs el
+                JOIN emails e ON el.email_id = e.id
+                WHERE el.customer_id = ?
+                ORDER BY el.sent_at DESC
+                LIMIT 20
+            ''', (customer_id,))
         
         logs = [{
             'subject': r[0], 'status': r[1], 'sent_at': r[2], 'email': r[3]
         } for r in cursor.fetchall()]
         
         # 主题池
-        cursor.execute('''
-            SELECT subject_index, subject_line, subject_type
-            FROM customer_subjects
-            WHERE customer_id = ?
-            ORDER BY subject_index
-        ''', (customer_id,))
+        if not admin and current_user_id:
+            cursor.execute('''
+                SELECT subject_index, subject_line, subject_type
+                FROM customer_subjects
+                WHERE customer_id = ? AND user_id = ?
+                ORDER BY subject_index
+            ''', (customer_id, current_user_id))
+        else:
+            cursor.execute('''
+                SELECT subject_index, subject_line, subject_type
+                FROM customer_subjects
+                WHERE customer_id = ?
+                ORDER BY subject_index
+            ''', (customer_id,))
         
         subjects = [{
             'index': r[0], 'line': r[1], 'type': r[2]
@@ -463,7 +493,7 @@ def api_customer_update(customer_id):
 
         # 检查客户是否存在
         if not admin and current_user_id:
-            cursor.execute("SELECT id FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (customer_id, current_user_id))
+            cursor.execute("SELECT id FROM customers WHERE id = ? AND user_id = ?", (customer_id, current_user_id))
         else:
             cursor.execute("SELECT id FROM customers WHERE id = ?", (customer_id,))
         if not cursor.fetchone():
@@ -482,7 +512,7 @@ def api_customer_update(customer_id):
             updates.append("updated_at = datetime('now')")
             params.append(customer_id)
             if not admin and current_user_id:
-                cursor.execute(f"UPDATE customers SET {', '.join(updates)} WHERE id = ? AND (user_id = ? OR user_id IS NULL)", params + [current_user_id])
+                cursor.execute(f"UPDATE customers SET {', '.join(updates)} WHERE id = ? AND user_id = ?", params + [current_user_id])
             else:
                 cursor.execute(f"UPDATE customers SET {', '.join(updates)} WHERE id = ?", params)
             conn.commit()
@@ -584,7 +614,7 @@ def api_customer_delete(customer_id):
 
         # 查询客户信息
         if not admin and current_user_id:
-            cursor.execute("SELECT id, customer_name FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (customer_id, current_user_id))
+            cursor.execute("SELECT id, customer_name FROM customers WHERE id = ? AND user_id = ?", (customer_id, current_user_id))
         else:
             cursor.execute("SELECT id, customer_name FROM customers WHERE id = ?", (customer_id,))
         row = cursor.fetchone()
@@ -596,7 +626,7 @@ def api_customer_delete(customer_id):
 
         # 删除客户（外键CASCADE会自动清理关联数据）
         if not admin and current_user_id:
-            cursor.execute("DELETE FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (customer_id, current_user_id))
+            cursor.execute("DELETE FROM customers WHERE id = ? AND user_id = ?", (customer_id, current_user_id))
         else:
             cursor.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
         conn.commit()
@@ -634,7 +664,7 @@ def api_customers_batch_delete():
         # 注意: f-string 仅用于生成占位符 ?,?,?，实际参数通过 execute() 传递，安全
         placeholders = ','.join('?' * len(ids))
         if not admin and current_user_id:
-            cursor.execute(f"SELECT id, customer_name FROM customers WHERE id IN ({placeholders}) AND (user_id = ? OR user_id IS NULL)", ids + [current_user_id])
+            cursor.execute(f"SELECT id, customer_name FROM customers WHERE id IN ({placeholders}) AND user_id = ?", ids + [current_user_id])
         else:
             cursor.execute(f"SELECT id, customer_name FROM customers WHERE id IN ({placeholders})", ids)
         customers_to_delete = cursor.fetchall()
@@ -646,7 +676,7 @@ def api_customers_batch_delete():
         # 执行删除
         # 注意: f-string 仅用于生成占位符 ?,?,?，实际参数通过 execute() 传递，安全
         if not admin and current_user_id:
-            cursor.execute(f"DELETE FROM customers WHERE id IN ({placeholders}) AND (user_id = ? OR user_id IS NULL)", ids + [current_user_id])
+            cursor.execute(f"DELETE FROM customers WHERE id IN ({placeholders}) AND user_id = ?", ids + [current_user_id])
         else:
             cursor.execute(f"DELETE FROM customers WHERE id IN ({placeholders})", ids)
         deleted_count = cursor.rowcount
@@ -1022,7 +1052,7 @@ def api_customer_emails(customer_id):
         user_where = ""
         user_params = [customer_id]
         if not admin and current_user_id:
-            user_where = " AND (e.user_id = ? OR e.user_id IS NULL)"
+            user_where = " AND e.user_id = ?"
             user_params.append(current_user_id)
 
         cursor.execute(f"""
@@ -1074,7 +1104,7 @@ def api_customer_email_add(customer_id):
 
         # 检查客户是否存在
         if not admin and current_user_id:
-            cursor.execute("SELECT id FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (customer_id, current_user_id))
+            cursor.execute("SELECT id FROM customers WHERE id = ? AND user_id = ?", (customer_id, current_user_id))
         else:
             cursor.execute("SELECT id FROM customers WHERE id = ?", (customer_id,))
         if not cursor.fetchone():
@@ -1130,7 +1160,7 @@ def api_customer_email_delete(customer_id, email_id):
         # 验证邮箱属于该客户
         if not admin and current_user_id:
             cursor.execute("""
-                SELECT id FROM emails WHERE id = ? AND customer_id = ? AND (user_id = ? OR user_id IS NULL)
+                SELECT id FROM emails WHERE id = ? AND customer_id = ? AND user_id = ?
             """, (email_id, customer_id, current_user_id))
         else:
             cursor.execute("""
@@ -1142,7 +1172,7 @@ def api_customer_email_delete(customer_id, email_id):
             return jsonify({'success': False, 'error': '邮箱不存在或不属于该客户'}), 404
 
         if not admin and current_user_id:
-            cursor.execute("DELETE FROM emails WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (email_id, current_user_id))
+            cursor.execute("DELETE FROM emails WHERE id = ? AND user_id = ?", (email_id, current_user_id))
         else:
             cursor.execute("DELETE FROM emails WHERE id = ?", (email_id,))
         conn.commit()
@@ -1199,7 +1229,7 @@ def api_email_logs():
         rows = cursor.fetchall()
 
         if not admin and current_user_id:
-            cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE (user_id = ? OR user_id IS NULL)", (current_user_id,))
+            cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE user_id = ?", (current_user_id,))
         else:
             cursor.execute('SELECT COUNT(*) FROM email_logs')
         total = cursor.fetchone()[0]
@@ -1236,7 +1266,7 @@ def api_subjects():
         user_where = ""
         user_params = []
         if not admin and current_user_id:
-            user_where = " WHERE (user_id = ? OR user_id IS NULL)"
+            user_where = " WHERE user_id = ?"
             user_params = [current_user_id]
 
         # 有主题池的客户数
@@ -1362,6 +1392,9 @@ def api_scheduler_config():
     """更新调度器配置"""
     try:
         data = request.json or {}
+        current_user_id = get_current_user_id()
+        if current_user_id:
+            save_user_setting(current_user_id, 'scheduler', data)
         scheduler_instance.update_config(data)
         return jsonify({'success': True, 'message': '调度配置已更新', 'data': scheduler_instance.config})
     except Exception as e:
@@ -1384,6 +1417,15 @@ def api_scheduler_preview():
     """预览本次将发送的邮件列表"""
     try:
         preview = scheduler_instance.get_preview()
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        if not admin and current_user_id:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM customers WHERE user_id = ?', (current_user_id,))
+            allowed_ids = {r[0] for r in cursor.fetchall()}
+            conn.close()
+            preview = [p for p in preview if p.get('customer_id') in allowed_ids]
         return jsonify({'success': True, 'data': {'emails': preview, 'count': len(preview)}})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1394,6 +1436,15 @@ def api_scheduler_queue():
     """获取发送队列详情"""
     try:
         queue = scheduler_instance.get_queue()
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        if not admin and current_user_id:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM customers WHERE user_id = ?', (current_user_id,))
+            allowed_ids = {r[0] for r in cursor.fetchall()}
+            conn.close()
+            queue = [q for q in queue if q.get('customer_id') in allowed_ids]
         return jsonify({'success': True, 'data': {'queue': queue}})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1411,7 +1462,7 @@ def api_countries():
         user_where = ""
         user_params = []
         if not admin and current_user_id:
-            user_where = " AND (c.user_id = ? OR c.user_id IS NULL)"
+            user_where = " AND c.user_id = ?"
             user_params = [current_user_id]
 
         cursor.execute(f'''
@@ -1574,30 +1625,39 @@ def api_scheduler_tree():
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND (c.user_id = ? OR c.user_id IS NULL)"
+            user_params = [current_user_id]
+
         # 获取所有有客户的国家
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT c.country, COUNT(DISTINCT c.id) as company_count
             FROM customers c
             WHERE c.country IS NOT NULL AND c.country != ''
-                  AND c.country != 'nan' AND c.country != 'NaN' AND c.country != 'None'
+                  AND c.country != 'nan' AND c.country != 'NaN' AND c.country != 'None'{user_where}
             GROUP BY c.country
             ORDER BY company_count DESC
-        ''')
+        ''', user_params)
         countries = cursor.fetchall()
 
         tree = []
         for country_row in countries:
             country_name = country_row[0]
             # 获取该国家下的公司
-            cursor.execute('''
+            cursor.execute(f'''
                 SELECT c.id, c.customer_name, c.industry_type,
                        COUNT(DISTINCT CASE WHEN e.is_active = 1 THEN e.id END) as email_count
                 FROM customers c
                 LEFT JOIN emails e ON c.id = e.customer_id
-                WHERE c.country = ?
+                WHERE c.country = ?{user_where}
                 GROUP BY c.id
                 ORDER BY c.customer_name
-            ''', (country_name,))
+            ''', [country_name] + user_params)
             companies = cursor.fetchall()
 
             company_list = []
@@ -1688,6 +1748,9 @@ def api_create_send_task():
         selected_material_ids = data.get('selected_material_ids')
         sender_material_id = data.get('sender_material_id')
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         # 检查是否有相同 email_ids 的任务正在运行
         email_ids_set = frozenset(email_ids) if email_ids else frozenset()
         with send_tasks_lock:
@@ -1707,6 +1770,11 @@ def api_create_send_task():
             cooldown_days = filter_config.get('cooldown_days', 7)
             cutoff_date = (datetime.now() - timedelta(days=cooldown_days)).strftime('%Y-%m-%d %H:%M:%S')
             placeholders = ','.join('?' * len(email_ids))
+            user_where = ""
+            user_params = []
+            if not admin and current_user_id:
+                user_where = " AND c.user_id = ? AND e.user_id = ?"
+                user_params = [current_user_id, current_user_id]
             cursor.execute(f'''
                 SELECT c.id, c.customer_name, c.country, c.website,
                        e.id, e.email_address, e.email_type,
@@ -1715,7 +1783,7 @@ def api_create_send_task():
                 FROM customers c
                 JOIN emails e ON c.id = e.customer_id
                 LEFT JOIN contacts ct ON e.contact_id = ct.id
-                WHERE e.id IN ({placeholders}) AND e.is_active = 1
+                WHERE e.id IN ({placeholders}) AND e.is_active = 1{user_where}
                   AND (
                       c.id IN (SELECT customer_id FROM cooldown_override)
                       OR c.id NOT IN (
@@ -1724,7 +1792,7 @@ def api_create_send_task():
                       )
                   )
                 ORDER BY c.id, e.id
-            ''', email_ids + [cutoff_date])
+            ''', email_ids + user_params + [cutoff_date])
             rows = cursor.fetchall()
             conn.close()
             emails_to_send = [{
@@ -1736,7 +1804,7 @@ def api_create_send_task():
             # 批量/测试发送：使用筛选器
             filter_engine = EmailFilter()
             filter_config['limit'] = 5 if task_type == 'test' else filter_config.get('limit', 1000)
-            emails_to_send = filter_engine.filter_customers(filter_config)
+            emails_to_send = filter_engine.filter_customers(filter_config, user_id=current_user_id, admin=admin)
 
         if not emails_to_send:
             return jsonify({'success': False, 'error': '没有符合条件的邮件（可能已在冷却期内发送过）'}), 400
@@ -1759,17 +1827,19 @@ def api_create_send_task():
                 'created_at': time.time()
             }
 
+        current_user_id = get_current_user_id()
         persist_send_task_meta(
             task_id=task_id, task_type=task_type, status='running',
             total_emails=len(emails_to_send),
             step_status={'send': 'running'},
             send_config=send_config,
+            user_id=current_user_id,
         )
 
         # 启动后台线程执行发送
         thread = threading.Thread(
             target=_do_batch_send,
-            args=(task_id, emails_to_send, send_config, target_word_count),
+            args=(task_id, emails_to_send, send_config, target_word_count, current_user_id),
             daemon=True
         )
         thread.start()
@@ -1780,7 +1850,7 @@ def api_create_send_task():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None):
+def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None, user_id=None):
     """后台执行批量发送任务 - 完整邮件工作流"""
     task = send_tasks.get(task_id)
     if not task:
@@ -1815,6 +1885,7 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None)
                 total_emails=len(emails_to_send),
                 progress=progress,
                 step_status={'send': 'running', 'current': message},
+                user_id=user_id,
             )
 
         # 导入智能标题管理器
@@ -1908,7 +1979,7 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None)
         if not all_email_items:
             task['status'] = 'failed'
             task['error'] = '所有客户邮件生成失败'
-            persist_send_task_meta(task_id, 'batch', 'failed', error='所有客户邮件生成失败')
+            persist_send_task_meta(task_id, 'batch', 'failed', error='所有客户邮件生成失败', user_id=user_id)
             return
 
         # 保存邮件预览（第一个客户的）
@@ -1975,7 +2046,8 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None)
                 step_status=task.get('step_status', {}),
                 email_preview=task.get('email_preview'),
                 send_config=send_config,
-                error=qt.error
+                error=qt.error,
+                user_id=user_id,
             )
 
     except Exception as e:
@@ -1983,7 +2055,7 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None)
         task['error'] = str(e)
         import traceback
         traceback.print_exc()
-        persist_send_task_meta(task_id, 'batch', 'failed', error=str(e))
+        persist_send_task_meta(task_id, 'batch', 'failed', error=str(e), user_id=user_id)
 
 
 @app.route('/api/send-tasks/<task_id>')
@@ -2014,7 +2086,9 @@ def api_get_send_task(task_id):
                 })
 
         # 从数据库获取
-        db_tasks = get_active_send_tasks()
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        db_tasks = get_active_send_tasks(user_id=current_user_id, admin=admin)
         db_task = next((t for t in db_tasks if t['task_id'] == task_id), None)
         if db_task:
             return jsonify({'success': True, 'data': {
@@ -2053,7 +2127,8 @@ def api_send_task_action(task_id):
             return jsonify({'success': False, 'error': '无效的操作'}), 400
 
         if success:
-            persist_send_task_meta(task_id, 'batch', action + 'ed' if action != 'cancel' else 'cancelled')
+            current_user_id = get_current_user_id()
+            persist_send_task_meta(task_id, 'batch', action + 'ed' if action != 'cancel' else 'cancelled', user_id=current_user_id)
         return jsonify({'success': success, 'message': message})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2063,21 +2138,31 @@ def api_send_task_action(task_id):
 def api_email_logs_stats():
     """获取发送统计（按客户聚合）"""
     try:
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         conn = get_connection()
         cursor = conn.cursor()
 
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " WHERE el.user_id = ?"
+            user_params = [current_user_id]
+
         # 按客户统计
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT c.id, c.customer_name, c.country,
                    COUNT(DISTINCT CASE WHEN el.send_status = 'sent' THEN el.id END) as sent_count,
                    COUNT(DISTINCT CASE WHEN el.send_status = 'failed' THEN el.id END) as failed_count,
                    MAX(el.sent_at) as last_sent
             FROM customers c
             LEFT JOIN email_logs el ON c.id = el.customer_id
+            {user_where}
             GROUP BY c.id
             ORDER BY sent_count DESC
             LIMIT 100
-        ''')
+        ''', user_params)
         rows = cursor.fetchall()
         conn.close()
 
@@ -2099,11 +2184,18 @@ def api_email_logs_by_customer():
         conn = get_connection()
         cursor = conn.cursor()
 
-        where_sql = ""
-        params = ()
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        where_clauses = []
+        params = []
         if country:
-            where_sql = "WHERE c.country = ?"
-            params = (country,)
+            where_clauses.append('c.country = ?')
+            params.append(country)
+        if not admin and current_user_id:
+            where_clauses.append('el.user_id = ?')
+            params.append(current_user_id)
+        where_sql = 'WHERE ' + ' AND '.join(where_clauses) if where_clauses else ''
 
         # 1. 按客户分组聚合（仅查询 email_logs 手动发送表）
         cursor.execute(f'''
@@ -2126,16 +2218,21 @@ def api_email_logs_by_customer():
             customer_id = cr[0]
 
             # 2. 查询该客户的详细邮件记录（仅 email_logs 表）
-            cursor.execute('''
+            detail_where = "WHERE el.customer_id = ?"
+            detail_params = [customer_id]
+            if not admin and current_user_id:
+                detail_where += " AND el.user_id = ?"
+                detail_params.append(current_user_id)
+            cursor.execute(f'''
                 SELECT el.id, el.email_id, e.email_address, el.email_subject,
                        el.email_content, el.send_status, el.error_message,
                        el.sent_at, el.task_id, el.source
                 FROM email_logs el
                 LEFT JOIN emails e ON el.email_id = e.id
-                WHERE el.customer_id = ?
+                {detail_where}
                 ORDER BY el.sent_at DESC
                 LIMIT 50
-            ''', (customer_id,))
+            ''', detail_params)
             email_rows = cursor.fetchall()
 
             # 按日期分组，同一天同主题邮件合并展示
@@ -2203,17 +2300,27 @@ def api_email_logs_by_customer():
 def api_email_log_detail(log_id):
     """获取单条手动邮件记录的完整内容"""
     try:
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+
+        where_sql = "WHERE el.id = ?"
+        params = [log_id]
+        if not admin and current_user_id:
+            where_sql += " AND el.user_id = ?"
+            params.append(current_user_id)
+
+        cursor.execute(f'''
             SELECT el.id, el.customer_id, c.customer_name, el.email_id, e.email_address,
                    el.email_subject, el.email_content, el.send_status, el.error_message,
                    el.sent_at, el.task_id, el.source
             FROM email_logs el
             LEFT JOIN customers c ON el.customer_id = c.id
             LEFT JOIN emails e ON el.email_id = e.id
-            WHERE el.id = ?
-        ''', (log_id,))
+            {where_sql}
+        ''', params)
         row = cursor.fetchone()
         conn.close()
 
@@ -2238,11 +2345,17 @@ def api_email_logs_scheduled_by_customer():
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         where_clauses = ["el.source = 'scheduled'"]
         params = []
         if country:
             where_clauses.append('c.country = ?')
             params.append(country)
+        if not admin and current_user_id:
+            where_clauses.append('el.user_id = ?')
+            params.append(current_user_id)
         where_sql = 'WHERE ' + ' AND '.join(where_clauses)
 
         # 1. 按客户分组聚合（从 email_logs 中筛选 source='scheduled'）
@@ -2266,16 +2379,21 @@ def api_email_logs_scheduled_by_customer():
             customer_id = cr[0]
 
             # 2. 查询该客户的详细邮件记录（从 email_logs 中筛选 source='scheduled'）
-            cursor.execute('''
+            detail_where = "WHERE el.customer_id = ? AND el.source = 'scheduled'"
+            detail_params = [customer_id]
+            if not admin and current_user_id:
+                detail_where += " AND el.user_id = ?"
+                detail_params.append(current_user_id)
+            cursor.execute(f'''
                 SELECT el.id, el.email_id, e.email_address, el.email_subject,
                        el.email_content, el.send_status, el.error_message,
                        el.sent_at, el.task_id, el.source
                 FROM email_logs el
                 LEFT JOIN emails e ON el.email_id = e.id
-                WHERE el.customer_id = ? AND el.source = 'scheduled'
+                {detail_where}
                 ORDER BY el.sent_at DESC
                 LIMIT 50
-            ''', (customer_id,))
+            ''', detail_params)
             email_rows = cursor.fetchall()
 
             # 按日期分组，同一天同主题邮件合并展示
@@ -2341,16 +2459,26 @@ def api_email_logs_scheduled_by_customer():
 def api_email_logs_countries():
     """获取发送记录涉及的所有国家及数量（手动+调度器合并）"""
     try:
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+
+        where_sql = "WHERE c.country IS NOT NULL AND c.country != ''"
+        params = []
+        if not admin and current_user_id:
+            where_sql += " AND el.user_id = ?"
+            params.append(current_user_id)
+
+        cursor.execute(f'''
             SELECT c.country, COUNT(*) as count
             FROM customers c
             JOIN email_logs el ON c.id = el.customer_id
-            WHERE c.country IS NOT NULL AND c.country != ''
+            {where_sql}
             GROUP BY c.country
             ORDER BY count DESC, c.country
-        ''')
+        ''', params)
         rows = cursor.fetchall()
         conn.close()
         return jsonify({
@@ -2365,17 +2493,27 @@ def api_email_logs_countries():
 def api_email_log_scheduled_detail(log_id):
     """获取单条调度器邮件记录的完整内容（从 email_logs 中筛选 source='scheduled'）"""
     try:
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+
+        where_sql = "WHERE el.id = ? AND el.source = 'scheduled'"
+        params = [log_id]
+        if not admin and current_user_id:
+            where_sql += " AND el.user_id = ?"
+            params.append(current_user_id)
+
+        cursor.execute(f'''
             SELECT el.id, el.customer_id, c.customer_name, el.email_id, e.email_address,
                    el.email_subject, el.email_content, el.send_status, el.error_message,
                    el.sent_at, el.task_id, el.source
             FROM email_logs el
             LEFT JOIN customers c ON el.customer_id = c.id
             LEFT JOIN emails e ON el.email_id = e.id
-            WHERE el.id = ? AND el.source = 'scheduled'
-        ''', (log_id,))
+            {where_sql}
+        ''', params)
         row = cursor.fetchone()
         conn.close()
 
@@ -2400,21 +2538,30 @@ def api_diagnostics_scheduled_logs():
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND el.user_id = ?"
+            user_params = [current_user_id]
+
         # 总记录数
-        cursor.execute('SELECT COUNT(*) FROM email_logs WHERE source = ?', ('scheduled',))
+        cursor.execute(f'SELECT COUNT(*) FROM email_logs WHERE source = ?{user_where}', ('scheduled',) + tuple(user_params))
         total = cursor.fetchone()[0]
 
         # 最近10条记录
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT el.id, el.customer_id, c.customer_name, el.email_id, e.email_address,
                    el.email_subject, el.send_status, el.sent_at, el.task_id
             FROM email_logs el
             LEFT JOIN customers c ON el.customer_id = c.id
             LEFT JOIN emails e ON el.email_id = e.id
-            WHERE el.source = ?
+            WHERE el.source = ?{user_where}
             ORDER BY el.sent_at DESC
             LIMIT 10
-        ''', ('scheduled',))
+        ''', ('scheduled',) + tuple(user_params))
         rows = cursor.fetchall()
         conn.close()
 
@@ -2456,23 +2603,34 @@ def api_cooldown_status():
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND c.user_id = ? AND e.user_id = ?"
+            user_params = [current_user_id, current_user_id]
+
         # 统计总客户数（有活跃邮箱的客户）
-        cursor.execute('''
-            SELECT COUNT(DISTINCT customer_id) FROM emails WHERE is_active = 1
-        ''')
+        cursor.execute(f'''
+            SELECT COUNT(DISTINCT e.customer_id) FROM emails e
+            JOIN customers c ON e.customer_id = c.id
+            WHERE e.is_active = 1{user_where}
+        ''', user_params)
         total_customers = cursor.fetchone()[0]
 
         # 查询每个客户的最后发送时间（按公司维度），排除手动解除的
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT c.id, c.customer_name, c.country,
                    COUNT(DISTINCT e.id) as email_count,
                    MAX(el.sent_at) as last_sent
             FROM customers c
             JOIN emails e ON c.id = e.customer_id AND e.is_active = 1
             LEFT JOIN email_logs el ON c.id = el.customer_id AND el.send_status = 'sent'
-            WHERE c.id NOT IN (SELECT customer_id FROM cooldown_override)
+            WHERE c.id NOT IN (SELECT customer_id FROM cooldown_override){user_where}
             GROUP BY c.id
-        ''')
+        ''', user_params)
         rows = cursor.fetchall()
 
         # 查询被手动解除的公司数量（用于统计）
@@ -2510,8 +2668,17 @@ def api_cooldown_emails():
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND c.user_id = ? AND e.user_id = ?"
+            user_params = [current_user_id, current_user_id]
+
         # 只查询处于冷却期的公司，排除手动解除的
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT
                 c.id as customer_id,
                 c.customer_name,
@@ -2522,11 +2689,11 @@ def api_cooldown_emails():
             FROM customers c
             JOIN emails e ON c.id = e.customer_id AND e.is_active = 1
             LEFT JOIN email_logs el ON c.id = el.customer_id AND el.send_status = 'sent'
-            WHERE c.id NOT IN (SELECT customer_id FROM cooldown_override)
+            WHERE c.id NOT IN (SELECT customer_id FROM cooldown_override){user_where}
             GROUP BY c.id
             HAVING MAX(el.sent_at) >= datetime('now', ? || ' days')
             ORDER BY c.country, c.customer_name
-        ''', (-cooldown_days,))
+        ''', user_params + [-cooldown_days])
         rows = cursor.fetchall()
         conn.close()
 
@@ -2590,8 +2757,19 @@ def api_cooldown_release():
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
 
+        # 验证客户权限
+        current_user_id = get_current_user_id()
+        admin = is_admin()
         conn = get_connection()
         cursor = conn.cursor()
+        if not admin and current_user_id:
+            cursor.execute('SELECT id FROM customers WHERE id = ? AND user_id = ?', (customer_id, current_user_id))
+        else:
+            cursor.execute('SELECT id FROM customers WHERE id = ?', (customer_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': '客户不存在或无权限访问'}), 403
+
         cursor.execute('''
             INSERT INTO cooldown_override (customer_id, released_at)
             VALUES (?, CURRENT_TIMESTAMP)
@@ -2617,6 +2795,20 @@ def api_send_test():
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
+
+        # 验证客户权限
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        conn_check = get_connection()
+        cursor_check = conn_check.cursor()
+        if not admin and current_user_id:
+            cursor_check.execute('SELECT id FROM customers WHERE id = ? AND user_id = ?', (customer_id, current_user_id))
+        else:
+            cursor_check.execute('SELECT id FROM customers WHERE id = ?', (customer_id,))
+        if not cursor_check.fetchone():
+            conn_check.close()
+            return jsonify({'success': False, 'error': '客户不存在或无权限访问'}), 403
+        conn_check.close()
 
         # 发送配置
         send_config = {
@@ -2648,18 +2840,20 @@ def api_send_test():
             }
 
         # 持久化任务元数据
+        current_user_id = get_current_user_id()
         persist_send_task_meta(
             task_id=task_id, task_type='manual', status='running',
             customer_id=customer_id,
             total_emails=len(email_addresses) if email_addresses else 0,
             step_status={step['id']: 'pending' for step in SEND_STEPS},
             send_config=send_config,
+            user_id=current_user_id,
         )
 
         # 启动后台线程执行发送
         thread = threading.Thread(
             target=_do_send_email,
-            args=(task_id, customer_id, email_addresses),
+            args=(task_id, customer_id, email_addresses, current_user_id),
             daemon=True
         )
         thread.start()
@@ -2689,7 +2883,7 @@ def _update_task_step(task_id, step_id, status='running', message=''):
         task['progress'] = int((completed_weight / total_weight) * 100) if total_weight > 0 else 0
 
 
-def _do_send_email(task_id, customer_id, email_addresses=None):
+def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None):
     """后台执行邮件发送"""
     task = send_tasks.get(task_id)
     if not task:
@@ -2699,29 +2893,41 @@ def _do_send_email(task_id, customer_id, email_addresses=None):
         conn = get_connection()
         cursor = conn.cursor()
 
-        # 获取客户信息
-        cursor.execute('SELECT customer_name, website FROM customers WHERE id = ?', (customer_id,))
+        # 获取客户信息（带user_id验证）
+        if user_id:
+            cursor.execute('SELECT customer_name, website FROM customers WHERE id = ? AND user_id = ?', (customer_id, user_id))
+        else:
+            cursor.execute('SELECT customer_name, website FROM customers WHERE id = ?', (customer_id,))
         row = cursor.fetchone()
         if not row:
             task['status'] = 'failed'
-            task['error'] = '客户不存在'
+            task['error'] = '客户不存在或无权限'
             conn.close()
             return
 
         customer_name, website = row
 
         persist_send_task_meta(task_id, 'manual', 'running',
-                               customer_id=customer_id, customer_name=customer_name)
+                               customer_id=customer_id, customer_name=customer_name,
+                               user_id=user_id)
 
         # 获取邮箱列表（contact_name 在 contacts 表中）
         if email_addresses:
             placeholders = ','.join('?' * len(email_addresses))
-            cursor.execute(f'''
-                SELECT e.id, e.email_address, e.email_type, COALESCE(e.contact_name, c.contact_name) as contact_name
-                FROM emails e
-                LEFT JOIN contacts c ON e.contact_id = c.id
-                WHERE e.customer_id = ? AND e.is_active = 1
-                  AND e.email_address IN ({placeholders})
+            if user_id:
+                cursor.execute(f'''
+                    SELECT e.id, e.email_address, e.email_type, COALESCE(e.contact_name, c.contact_name) as contact_name
+                    FROM emails e
+                    LEFT JOIN contacts c ON e.contact_id = c.id
+                    WHERE e.customer_id = ? AND e.user_id = ? AND e.is_active = 1
+                      AND e.email_address IN ({placeholders})''', [customer_id, user_id] + email_addresses)
+            else:
+                cursor.execute(f'''
+                    SELECT e.id, e.email_address, e.email_type, COALESCE(e.contact_name, c.contact_name) as contact_name
+                    FROM emails e
+                    LEFT JOIN contacts c ON e.contact_id = c.id
+                    WHERE e.customer_id = ? AND e.is_active = 1
+                      AND e.email_address IN ({placeholders})
             ''', [customer_id] + email_addresses)
         else:
             cursor.execute('''
@@ -2803,7 +3009,8 @@ def _do_send_email(task_id, customer_id, email_addresses=None):
                                total_emails=len(email_items),
                                step_status=task.get('step_status', {}),
                                email_preview=task.get('email_preview'),
-                               send_config=send_config)
+                               send_config=send_config,
+                               user_id=user_id)
 
         # 写入日志文件确保能看到
         with open('send_queue.log', 'a', encoding='utf-8') as lf:
@@ -2852,7 +3059,8 @@ def _do_send_email(task_id, customer_id, email_addresses=None):
                     step_status=task.get('step_status', {}),
                     email_preview=task.get('email_preview'),
                     send_config=send_config,
-                    error=qt.error
+                    error=qt.error,
+                    user_id=user_id,
                 )
 
     except Exception as e:
@@ -2860,7 +3068,7 @@ def _do_send_email(task_id, customer_id, email_addresses=None):
         task['error'] = str(e)
         import traceback
         traceback.print_exc()
-        persist_send_task_meta(task_id, 'manual', 'failed', error=str(e))
+        persist_send_task_meta(task_id, 'manual', 'failed', error=str(e), user_id=user_id)
 
 
 @app.route('/api/send/tasks')
@@ -2869,7 +3077,9 @@ def api_send_tasks():
     try:
         with send_tasks_lock:
             memory_tasks = {tid: t['status'] for tid, t in send_tasks.items()}
-        db_tasks = get_active_send_tasks()
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        db_tasks = get_active_send_tasks(user_id=current_user_id, admin=admin)
         result = []
         for t in db_tasks:
             in_memory = memory_tasks.get(t['task_id']) == t['status']
@@ -2889,11 +3099,13 @@ def api_send_task_detail(task_id):
         qm_status = queue_manager.get_task_status(task_id)
         if qm_status:
             return jsonify({'success': True, 'data': qm_status})
-        db_tasks = get_active_send_tasks()
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        db_tasks = get_active_send_tasks(user_id=current_user_id, admin=admin)
         task = next((t for t in db_tasks if t['task_id'] == task_id), None)
         if not task:
             return jsonify({'success': False, 'error': '任务不存在'}), 404
-        items = get_send_task_items(task_id)
+        items = get_send_task_items(task_id, user_id=current_user_id, admin=admin)
         return jsonify({'success': True, 'data': {
             'id': task['task_id'], 'status': task['status'],
             'progress': task['progress'], 'current_step': task['current_step'],
@@ -2915,14 +3127,24 @@ def api_send_tasks_scheduled():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND user_id = ?"
+            user_params = [current_user_id]
+
+        cursor.execute(f'''
             SELECT task_id, task_type, status, customer_name, total_emails, sent_count,
                    failed_count, progress, created_at, completed_at
             FROM send_tasks_meta
             WHERE task_type IN ('scheduled', 'batch', 'test')
-               AND created_at > datetime('now', '-7 days')
+               AND created_at > datetime('now', '-7 days'){user_where}
             ORDER BY created_at DESC LIMIT 50
-        ''')
+        ''', user_params)
         rows = cursor.fetchall()
         conn.close()
         tasks = [{'task_id': r[0], 'task_type': r[1], 'status': r[2], 'customer_name': r[3],
@@ -2947,11 +3169,13 @@ def api_send_status(task_id):
             task = send_tasks.get(task_id)
             if not task:
                 # 数据库回退
-                db_tasks = get_active_send_tasks()
+                current_user_id = get_current_user_id()
+                admin = is_admin()
+                db_tasks = get_active_send_tasks(user_id=current_user_id, admin=admin)
                 db_task = next((t for t in db_tasks if t['task_id'] == task_id), None)
                 if not db_task:
                     return jsonify({'success': False, 'error': '任务不存在'}), 404
-                items = get_send_task_items(task_id)
+                items = get_send_task_items(task_id, user_id=current_user_id, admin=admin)
                 return jsonify({
                     'success': True, 'data': {
                         'id': db_task['task_id'], 'status': db_task['status'],
@@ -3005,9 +3229,21 @@ def api_send_status(task_id):
 def api_send_pause(task_id):
     """暂停发送任务"""
     try:
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        if not admin and current_user_id:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id FROM send_tasks_meta WHERE task_id = ?', (task_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return jsonify({'success': False, 'error': '任务不存在'}), 404
+            if row[0] is not None and row[0] != current_user_id:
+                return jsonify({'success': False, 'error': '无权操作此任务'}), 403
         success = queue_manager.pause_task(task_id)
         if success:
-            persist_send_task_meta(task_id, 'manual', 'paused')
+            persist_send_task_meta(task_id, 'manual', 'paused', user_id=current_user_id)
         return jsonify({'success': success, 'message': '已暂停' if success else '无法暂停'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3017,9 +3253,21 @@ def api_send_pause(task_id):
 def api_send_resume(task_id):
     """恢复发送任务"""
     try:
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        if not admin and current_user_id:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id FROM send_tasks_meta WHERE task_id = ?', (task_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return jsonify({'success': False, 'error': '任务不存在'}), 404
+            if row[0] is not None and row[0] != current_user_id:
+                return jsonify({'success': False, 'error': '无权操作此任务'}), 403
         success = queue_manager.resume_task(task_id)
         if success:
-            persist_send_task_meta(task_id, 'manual', 'running')
+            persist_send_task_meta(task_id, 'manual', 'running', user_id=current_user_id)
         return jsonify({'success': success, 'message': '已恢复' if success else '无法恢复'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3029,9 +3277,21 @@ def api_send_resume(task_id):
 def api_send_cancel(task_id):
     """取消发送任务"""
     try:
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        if not admin and current_user_id:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id FROM send_tasks_meta WHERE task_id = ?', (task_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return jsonify({'success': False, 'error': '任务不存在'}), 404
+            if row[0] is not None and row[0] != current_user_id:
+                return jsonify({'success': False, 'error': '无权操作此任务'}), 403
         success = queue_manager.cancel_task(task_id)
         if success:
-            persist_send_task_meta(task_id, 'manual', 'cancelled')
+            persist_send_task_meta(task_id, 'manual', 'cancelled', user_id=current_user_id)
         return jsonify({'success': success, 'message': '已取消' if success else '无法取消'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3050,6 +3310,20 @@ def api_email_preview():
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
+
+        # 验证客户权限
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        conn_check = get_connection()
+        cursor_check = conn_check.cursor()
+        if not admin and current_user_id:
+            cursor_check.execute('SELECT id FROM customers WHERE id = ? AND user_id = ?', (customer_id, current_user_id))
+        else:
+            cursor_check.execute('SELECT id FROM customers WHERE id = ?', (customer_id,))
+        if not cursor_check.fetchone():
+            conn_check.close()
+            return jsonify({'success': False, 'error': '客户不存在或无权限访问'}), 403
+        conn_check.close()
 
         # 生成任务ID
         task_id = str(uuid.uuid4())[:8]
@@ -3072,9 +3346,10 @@ def api_email_preview():
             }
 
         # 启动后台线程生成邮件
+        current_user_id = get_current_user_id()
         thread = threading.Thread(
             target=_do_generate_preview,
-            args=(task_id, customer_id),
+            args=(task_id, customer_id, current_user_id),
             daemon=True
         )
         thread.start()
@@ -3085,7 +3360,7 @@ def api_email_preview():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-def _do_generate_preview(task_id, customer_id):
+def _do_generate_preview(task_id, customer_id, user_id=None):
     """后台生成邮件预览内容"""
     task = send_tasks.get(task_id)
     if not task:
@@ -3095,12 +3370,15 @@ def _do_generate_preview(task_id, customer_id):
         conn = get_connection()
         cursor = conn.cursor()
 
-        # 获取客户信息
-        cursor.execute('SELECT customer_name, website FROM customers WHERE id = ?', (customer_id,))
+        # 获取客户信息（带user_id验证）
+        if user_id:
+            cursor.execute('SELECT customer_name, website FROM customers WHERE id = ? AND user_id = ?', (customer_id, user_id))
+        else:
+            cursor.execute('SELECT customer_name, website FROM customers WHERE id = ?', (customer_id,))
         row = cursor.fetchone()
         if not row:
             task['status'] = 'failed'
-            task['error'] = '客户不存在'
+            task['error'] = '客户不存在或无权限'
             conn.close()
             return
 
@@ -3188,6 +3466,7 @@ def api_email_send():
                 'created_at': time.time()
             }
 
+        current_user_id = get_current_user_id()
         persist_send_task_meta(
             task_id=task_id, task_type='manual', status='running',
             customer_id=customer_id,
@@ -3195,12 +3474,13 @@ def api_email_send():
             step_status={'send': 'running'},
             email_preview={'subject': subject, 'body': body},
             send_config=send_config,
+            user_id=current_user_id,
         )
 
         # 启动后台线程执行发送
         thread = threading.Thread(
             target=_do_send_custom_email,
-            args=(task_id, customer_id, email_addresses, subject, body),
+            args=(task_id, customer_id, email_addresses, subject, body, current_user_id),
             daemon=True
         )
         thread.start()
@@ -3211,7 +3491,7 @@ def api_email_send():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-def _do_send_custom_email(task_id, customer_id, email_addresses, subject, body):
+def _do_send_custom_email(task_id, customer_id, email_addresses, subject, body, user_id=None):
     """后台发送用户自定义内容的邮件（使用队列管理器）"""
     task = send_tasks.get(task_id)
     if not task:
@@ -3221,29 +3501,42 @@ def _do_send_custom_email(task_id, customer_id, email_addresses, subject, body):
         conn = get_connection()
         cursor = conn.cursor()
 
-        # 获取客户信息
-        cursor.execute('SELECT customer_name FROM customers WHERE id = ?', (customer_id,))
+        # 获取客户信息（带user_id验证）
+        if user_id:
+            cursor.execute('SELECT customer_name FROM customers WHERE id = ? AND user_id = ?', (customer_id, user_id))
+        else:
+            cursor.execute('SELECT customer_name FROM customers WHERE id = ?', (customer_id,))
         row = cursor.fetchone()
         if not row:
             task['status'] = 'failed'
-            task['error'] = '客户不存在'
+            task['error'] = '客户不存在或无权限'
             conn.close()
             return
 
         customer_name = row[0]
 
         persist_send_task_meta(task_id, 'manual', 'running',
-                               customer_id=customer_id, customer_name=customer_name)
+                               customer_id=customer_id, customer_name=customer_name,
+                               user_id=user_id)
 
         # 获取邮箱列表
         placeholders = ','.join('?' * len(email_addresses))
-        cursor.execute(f'''
-            SELECT e.id, e.email_address, e.email_type, COALESCE(e.contact_name, c.contact_name) as contact_name
-            FROM emails e
-            LEFT JOIN contacts c ON e.contact_id = c.id
-            WHERE e.customer_id = ? AND e.is_active = 1
-              AND e.email_address IN ({placeholders})
-        ''', [customer_id] + email_addresses)
+        if user_id:
+            cursor.execute(f'''
+                SELECT e.id, e.email_address, e.email_type, COALESCE(e.contact_name, c.contact_name) as contact_name
+                FROM emails e
+                LEFT JOIN contacts c ON e.contact_id = c.id
+                WHERE e.customer_id = ? AND e.user_id = ? AND e.is_active = 1
+                  AND e.email_address IN ({placeholders})
+            ''', [customer_id, user_id] + email_addresses)
+        else:
+            cursor.execute(f'''
+                SELECT e.id, e.email_address, e.email_type, COALESCE(e.contact_name, c.contact_name) as contact_name
+                FROM emails e
+                LEFT JOIN contacts c ON e.contact_id = c.id
+                WHERE e.customer_id = ? AND e.is_active = 1
+                  AND e.email_address IN ({placeholders})
+            ''', [customer_id] + email_addresses)
         emails = cursor.fetchall()
         conn.close()
 
@@ -3318,7 +3611,8 @@ def _do_send_custom_email(task_id, customer_id, email_addresses, subject, body):
                 step_status=task.get('step_status', {}),
                 email_preview=task.get('email_preview'),
                 send_config=send_config,
-                error=qt.error
+                error=qt.error,
+                user_id=user_id,
             )
 
     except Exception as e:
@@ -3326,52 +3620,70 @@ def _do_send_custom_email(task_id, customer_id, email_addresses, subject, body):
         task['error'] = str(e)
         import traceback
         traceback.print_exc()
-        persist_send_task_meta(task_id, 'manual', 'failed', error=str(e))
+        persist_send_task_meta(task_id, 'manual', 'failed', error=str(e), user_id=user_id)
 
 
 @app.route('/api/config')
 def api_config():
-    """获取系统配置"""
+    """获取系统配置（按用户隔离）"""
     try:
+        current_user_id = get_current_user_id()
+
+        # 先从用户隔离表读取
+        user_settings = get_all_user_settings(current_user_id) if current_user_id else {}
+
         config_path = os.path.join(os.path.dirname(__file__), 'config', 'smtp_config.json')
         company_path = os.path.join(os.path.dirname(__file__), 'config', 'company_info.json')
         llm_path = os.path.join(os.path.dirname(__file__), 'config', 'llm_config.json')
 
-        smtp_config = {}
-        company_config = {}
-        llm_config = {}
-
-        if os.path.exists(config_path):
+        smtp_config = user_settings.get('smtp')
+        if smtp_config is None and os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 smtp_config = json.load(f)
-            # 隐藏密码
-            smtp_config['password'] = '****'
 
-        if os.path.exists(company_path):
+        company_config = user_settings.get('company')
+        if company_config is None and os.path.exists(company_path):
             with open(company_path, 'r', encoding='utf-8') as f:
                 company_config = json.load(f)
 
-        if os.path.exists(llm_path):
+        llm_config = user_settings.get('llm')
+        if llm_config is None and os.path.exists(llm_path):
             with open(llm_path, 'r', encoding='utf-8') as f:
                 llm_config = json.load(f)
-            # 隐藏 API Key
-            if llm_config.get('api_key'):
-                llm_config['api_key_masked'] = llm_config['api_key'][:8] + '****'
-            else:
-                llm_config['api_key_masked'] = ''
+
+        if not isinstance(smtp_config, dict):
+            smtp_config = {}
+        if not isinstance(company_config, dict):
+            company_config = {}
+        if not isinstance(llm_config, dict):
+            llm_config = {}
+
+        # 隐藏密码
+        smtp_config['password'] = '****'
+
+        # 隐藏 API Key
+        if llm_config.get('api_key'):
+            llm_config['api_key_masked'] = llm_config['api_key'][:8] + '****'
+        else:
+            llm_config['api_key_masked'] = ''
 
         # 读取调度器配置
-        scheduler_config_path = os.path.join(os.path.dirname(__file__), 'config', 'scheduler_config.json')
+        scheduler_config = user_settings.get('scheduler')
         scheduler_send_interval = 120
         scheduler_cooldown_days = 7
-        if os.path.exists(scheduler_config_path):
-            try:
-                with open(scheduler_config_path, 'r', encoding='utf-8') as f:
-                    scheduler_cfg = json.load(f)
-                    scheduler_send_interval = scheduler_cfg.get('send_interval', 120)
-                    scheduler_cooldown_days = scheduler_cfg.get('cooldown_days', 7)
-            except Exception:
-                pass
+        if isinstance(scheduler_config, dict):
+            scheduler_send_interval = scheduler_config.get('send_interval', 120)
+            scheduler_cooldown_days = scheduler_config.get('cooldown_days', 7)
+        else:
+            scheduler_config_path = os.path.join(os.path.dirname(__file__), 'config', 'scheduler_config.json')
+            if os.path.exists(scheduler_config_path):
+                try:
+                    with open(scheduler_config_path, 'r', encoding='utf-8') as f:
+                        scheduler_cfg = json.load(f)
+                        scheduler_send_interval = scheduler_cfg.get('send_interval', 120)
+                        scheduler_cooldown_days = scheduler_cfg.get('cooldown_days', 7)
+                except Exception:
+                    pass
 
         return jsonify({
             'success': True,
@@ -3392,47 +3704,48 @@ def api_config():
 @app.route('/api/config', methods=['POST'])
 @require_ajax
 def api_config_update():
-    """更新系统配置（SMTP、公司信息、调度器）"""
+    """更新系统配置（SMTP、公司信息、调度器），按用户隔离"""
     try:
         data = request.json or {}
         config_type = data.get('type')  # 'smtp' 或 'company' 或 'llm' 或 'scheduler'
         config_data = data.get('data', {})
+        current_user_id = get_current_user_id()
 
         if config_type not in ('smtp', 'company', 'llm', 'scheduler'):
             return jsonify({'success': False, 'error': '无效的配置类型'}), 400
 
-        if config_type == 'smtp':
-            config_path = os.path.join(os.path.dirname(__file__), 'config', 'smtp_config.json')
-            # 读取现有配置，保留密码（如果前端未提供）
-            existing = {}
+        # 读取用户已有配置（用于保留敏感字段）
+        existing = get_user_setting(current_user_id, config_type) or {}
+
+        # 兼容：如果用户没有自己的设置，回退到旧 JSON 文件
+        if not existing:
+            if config_type == 'smtp':
+                config_path = os.path.join(os.path.dirname(__file__), 'config', 'smtp_config.json')
+            elif config_type == 'llm':
+                config_path = os.path.join(os.path.dirname(__file__), 'config', 'llm_config.json')
+            elif config_type == 'scheduler':
+                config_path = os.path.join(os.path.dirname(__file__), 'config', 'scheduler_config.json')
+            else:
+                config_path = os.path.join(os.path.dirname(__file__), 'config', 'company_info.json')
+
             if os.path.exists(config_path):
                 with open(config_path, 'r', encoding='utf-8') as f:
                     existing = json.load(f)
+
+        if config_type == 'smtp':
             # 如果前端密码为 **** 或空，保留原密码
             if config_data.get('password') in ('****', '', None):
                 config_data['password'] = existing.get('password', '')
         elif config_type == 'llm':
-            config_path = os.path.join(os.path.dirname(__file__), 'config', 'llm_config.json')
             # 保留现有 API Key（如果前端未提供或为空）
-            existing = {}
-            if os.path.exists(config_path):
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    existing = json.load(f)
             if not config_data.get('api_key'):
                 config_data['api_key'] = existing.get('api_key', '')
         elif config_type == 'scheduler':
-            config_path = os.path.join(os.path.dirname(__file__), 'config', 'scheduler_config.json')
             # 合并现有配置
-            existing = {}
-            if os.path.exists(config_path):
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    existing = json.load(f)
             config_data = {**existing, **config_data}
-        else:
-            config_path = os.path.join(os.path.dirname(__file__), 'config', 'company_info.json')
 
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config_data, f, ensure_ascii=False, indent=4)
+        # 保存到用户隔离表
+        save_user_setting(current_user_id, config_type, config_data)
 
         # 更新调度器实例的内存配置
         if config_type == 'scheduler' and scheduler_instance:
@@ -4474,7 +4787,7 @@ def _do_batch_import(task_id, temp_path, filename, user_id=None):
                 # 检查客户是否已存在（按用户隔离）
                 if user_id:
                     cursor.execute(
-                        'SELECT id FROM customers WHERE customer_name = ? AND (user_id = ? OR user_id IS NULL)',
+                        'SELECT id FROM customers WHERE customer_name = ? AND user_id = ?',
                         (customer['customer_name'], user_id)
                     )
                 else:

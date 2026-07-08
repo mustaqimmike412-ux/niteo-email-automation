@@ -212,7 +212,7 @@ def get_material_usage_logs(page=1, per_page=20, user_id=None, admin=False) -> D
     where_clauses = []
     params = []
     if not admin and user_id:
-        where_clauses.append("(user_id = ? OR user_id IS NULL)")
+        where_clauses.append("user_id = ?")
         params.append(user_id)
 
     where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
@@ -280,7 +280,7 @@ def get_materials_list(material_type=None, category=None, scope=None, track=None
         like = f"%{search}%"
         params.extend([like, like, like])
     if not admin and user_id:
-        where_clauses.append("(user_id = ? OR user_id IS NULL)")
+        where_clauses.append("user_id = ?")
         params.append(user_id)
 
     where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
@@ -331,7 +331,7 @@ def get_material_by_id(material_id: int, user_id: int = None, admin: bool = Fals
                    region, content_json, content_summary, priority, is_active,
                    has_attachment, attachment_path, attachment_type, attachment_name,
                    tags, source, created_at, updated_at
-            FROM materials WHERE id = ? AND (user_id = ? OR user_id IS NULL)
+            FROM materials WHERE id = ? AND user_id = ?
         """, (material_id, user_id))
     else:
         cursor.execute("""
@@ -439,7 +439,7 @@ def get_material_types(user_id: int = None, admin: bool = False) -> List[str]:
     conn = get_connection()
     cursor = conn.cursor()
     if not admin and user_id:
-        cursor.execute("SELECT DISTINCT material_type FROM materials WHERE (user_id = ? OR user_id IS NULL) ORDER BY material_type", (user_id,))
+        cursor.execute("SELECT DISTINCT material_type FROM materials WHERE user_id = ? ORDER BY material_type", (user_id,))
     else:
         cursor.execute("SELECT DISTINCT material_type FROM materials ORDER BY material_type")
     types = [row[0] for row in cursor.fetchall()]
@@ -472,16 +472,16 @@ def get_material_stats(user_id: int = None, admin: bool = False) -> Dict:
     conn = get_connection()
     cursor = conn.cursor()
 
-    user_where = " WHERE (user_id = ? OR user_id IS NULL)" if (not admin and user_id) else ""
+    user_where = " WHERE user_id = ?" if (not admin and user_id) else ""
     user_params = [user_id] if (not admin and user_id) else []
 
     cursor.execute(f"SELECT COUNT(*) FROM materials{user_where}", user_params)
     total = cursor.fetchone()[0]
 
-    cursor.execute(f"SELECT COUNT(*) FROM materials WHERE is_active = 1{' AND (user_id = ? OR user_id IS NULL)' if (not admin and user_id) else ''}", user_params)
+    cursor.execute(f"SELECT COUNT(*) FROM materials WHERE is_active = 1{' AND user_id = ?' if (not admin and user_id) else ''}", user_params)
     active = cursor.fetchone()[0]
 
-    cursor.execute(f"SELECT material_type, COUNT(*) FROM materials{' WHERE (user_id = ? OR user_id IS NULL)' if (not admin and user_id) else ''} GROUP BY material_type", user_params)
+    cursor.execute(f"SELECT material_type, COUNT(*) FROM materials{' WHERE user_id = ?' if (not admin and user_id) else ''} GROUP BY material_type", user_params)
     type_counts = {row[0]: row[1] for row in cursor.fetchall()}
 
     cursor.execute(f"SELECT COUNT(*) FROM material_usage_log{user_where}", user_params)

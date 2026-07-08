@@ -318,6 +318,12 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_send_tasks_meta_status ON send_tasks_meta(status, created_at)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_send_tasks_meta_created ON send_tasks_meta(created_at DESC)')
 
+    # 迁移：为 send_tasks_meta 添加 user_id 字段
+    try:
+        cursor.execute('ALTER TABLE send_tasks_meta ADD COLUMN user_id INTEGER')
+    except:
+        pass
+
     conn.commit()
     conn.close()
     print("数据库初始化完成")
@@ -326,7 +332,7 @@ def init_database():
 def persist_send_task_meta(task_id, task_type='manual', status='pending', customer_id=None,
                            customer_name=None, total_emails=0, sent_count=0, failed_count=0,
                            current_index=0, progress=0, current_step='', step_status=None,
-                           email_preview=None, send_config=None, error=None):
+                           email_preview=None, send_config=None, error=None, user_id=None):
     """持久化发送任务元数据到数据库（upsert 语义）"""
     try:
         conn = get_connection()
@@ -336,8 +342,8 @@ def persist_send_task_meta(task_id, task_type='manual', status='pending', custom
             (task_id, task_type, status, customer_id, customer_name, total_emails,
              sent_count, failed_count, current_index, progress, current_step,
              step_status, email_preview_subject, email_preview_body,
-             email_preview_word_count, send_config, error, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+             email_preview_word_count, send_config, error, user_id, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(task_id) DO UPDATE SET
                 status=excluded.status,
                 total_emails=excluded.total_emails,
@@ -361,7 +367,8 @@ def persist_send_task_meta(task_id, task_type='manual', status='pending', custom
             email_preview.get('body') if email_preview else None,
             email_preview.get('word_count') if email_preview else None,
             json.dumps(send_config or {}, ensure_ascii=False),
-            error
+            error,
+            user_id
         ))
         conn.commit()
         conn.close()
@@ -369,25 +376,30 @@ def persist_send_task_meta(task_id, task_type='manual', status='pending', custom
         print(f"  ⚠ 持久化任务元数据失败: {e}")
 
 
-def get_active_send_tasks():
+def get_active_send_tasks(user_id=None, admin=False):
     """获取所有活跃任务（running/paused）和最近24小时完成的任务"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        params = []
+        user_where = ""
+        if not admin and user_id:
+            user_where = " AND user_id = ?"
+            params = [user_id]
+        cursor.execute(f'''
             SELECT task_id, task_type, status, customer_id, customer_name,
                    total_emails, sent_count, failed_count, current_index,
                    progress, current_step, step_status, email_preview_subject,
                    email_preview_body, email_preview_word_count, send_config,
                    error, created_at, started_at, completed_at
             FROM send_tasks_meta
-            WHERE status IN ('running', 'paused')
+            WHERE (status IN ('running', 'paused')
                OR (status IN ('completed', 'failed', 'cancelled')
-                   AND created_at > datetime('now', '-24 hours'))
+                   AND created_at > datetime('now', '-24 hours'))){user_where}
             ORDER BY
                 CASE WHEN status IN ('running', 'paused') THEN 0 ELSE 1 END,
                 created_at DESC
-        ''')
+        ''', params)
         rows = cursor.fetchall()
         conn.close()
 
@@ -412,19 +424,29 @@ def get_active_send_tasks():
         return []
 
 
-def get_send_task_items(task_id):
+def get_send_task_items(task_id, user_id=None, admin=False):
     """获取指定任务的所有邮件项"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT email_id, customer_id, email_address, contact_name, email_type,
-                   subject, greeting, item_status, retry_count, max_retries,
-                   error_message, scheduled_send_at, actual_send_at
-            FROM send_task_items
-            WHERE task_id = ?
-            ORDER BY id
-        ''', (task_id,))
+        if not admin and user_id:
+            cursor.execute('''
+                SELECT email_id, customer_id, email_address, contact_name, email_type,
+                       subject, greeting, item_status, retry_count, max_retries,
+                       error_message, scheduled_send_at, actual_send_at
+                FROM send_task_items
+                WHERE task_id = ? AND user_id = ?
+                ORDER BY id
+            ''', (task_id, user_id))
+        else:
+            cursor.execute('''
+                SELECT email_id, customer_id, email_address, contact_name, email_type,
+                       subject, greeting, item_status, retry_count, max_retries,
+                       error_message, scheduled_send_at, actual_send_at
+                FROM send_task_items
+                WHERE task_id = ?
+                ORDER BY id
+            ''', (task_id,))
         rows = cursor.fetchall()
         conn.close()
 

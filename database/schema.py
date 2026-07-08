@@ -678,6 +678,20 @@ def init_database():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_invite_logs_code ON invite_code_logs(code)')
 
+    # ==================== 用户设置隔离表 ====================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            setting_type TEXT NOT NULL,
+            setting_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, setting_type)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_settings_user ON user_settings(user_id, setting_type)')
+
     conn.commit()
     conn.close()
     print("数据库初始化完成")

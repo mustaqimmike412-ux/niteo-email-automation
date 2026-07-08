@@ -13,7 +13,7 @@ def get_all_api_configs(user_id: int = None, admin: bool = False):
     if not admin and user_id:
         cursor.execute('''
             SELECT id, api_name, api_key, base_url, model, extra_config, is_active, created_at, updated_at
-            FROM api_configs WHERE (user_id = ? OR user_id IS NULL) ORDER BY id DESC
+            FROM api_configs WHERE user_id = ? ORDER BY id DESC
         ''', (user_id,))
     else:
         cursor.execute('''
@@ -42,7 +42,7 @@ def get_api_config(api_name: str, user_id: int = None, admin: bool = False):
     if not admin and user_id:
         cursor.execute('''
             SELECT id, api_name, api_key, base_url, model, extra_config, is_active
-            FROM api_configs WHERE api_name = ? AND is_active = 1 AND (user_id = ? OR user_id IS NULL)
+            FROM api_configs WHERE api_name = ? AND is_active = 1 AND user_id = ?
         ''', (api_name, user_id))
     else:
         cursor.execute('''
@@ -119,7 +119,7 @@ def update_api_config(api_name: str, api_key: str = None, base_url: str = None,
     params.append(api_name)
     where_extra = ""
     if not admin and user_id:
-        where_extra = " AND (user_id = ? OR user_id IS NULL)"
+        where_extra = " AND user_id = ?"
         params.append(user_id)
     cursor.execute(f"UPDATE api_configs SET {', '.join(sets)} WHERE api_name = ?{where_extra}", params)
     conn.commit()
@@ -132,7 +132,7 @@ def delete_api_config(api_name: str, user_id: int = None, admin: bool = False) -
     conn = get_connection()
     cursor = conn.cursor()
     if not admin and user_id:
-        cursor.execute('DELETE FROM api_configs WHERE api_name = ? AND (user_id = ? OR user_id IS NULL)', (api_name, user_id))
+        cursor.execute('DELETE FROM api_configs WHERE api_name = ? AND user_id = ?', (api_name, user_id))
     else:
         cursor.execute('DELETE FROM api_configs WHERE api_name = ?', (api_name,))
     conn.commit()
