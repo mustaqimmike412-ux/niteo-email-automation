@@ -1904,23 +1904,6 @@
                     </div>
                 </div>
 
-                <!-- 发信人模板卡片 -->
-                <div class="card" id="sender-info-panel" style="margin-bottom:20px;border:1.5px solid rgba(74,125,228,0.15);background:linear-gradient(135deg,rgba(74,125,228,0.03),rgba(102,126,234,0.03))">
-                    <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
-                        <div style="display:flex;align-items:center;gap:12px">
-                            <div style="width:40px;height:40px;border-radius:12px;background:rgba(74,125,228,0.1);display:flex;align-items:center;justify-content:center;font-size:20px">📝</div>
-                            <div>
-                                <h3 style="font-size:1rem;font-weight:600">发信人模板</h3>
-                                <p style="font-size:0.78rem;color:var(--text-3);margin-top:2px">可创建多个发信人，发邮件前自由切换</p>
-                            </div>
-                        </div>
-                        <button class="btn btn-accent btn-sm" onclick="openSenderInfoModal(null)">+ 添加模板</button>
-                    </div>
-                    <div class="card-body" id="sender-info-card-body" style="padding:16px 22px">
-                        <div style="font-size:0.85rem;color:var(--text-3)">加载中...</div>
-                    </div>
-                </div>
-
                 <!-- 统计卡片 -->
                 <div class="stats-row" id="material-stats" style="margin-bottom:20px"></div>
 
@@ -1933,10 +1916,13 @@
                                 <div style="width:36px;height:36px;border-radius:10px;background:rgba(74,125,228,0.1);display:flex;align-items:center;justify-content:center;font-size:18px">👤</div>
                                 <div>
                                     <h3 style="font-size:1rem;font-weight:600">个人信息</h3>
-                                    <p style="font-size:0.75rem;color:var(--text-3);margin-top:2px">发件人自我介绍、职位信息等</p>
+                                    <p style="font-size:0.75rem;color:var(--text-3);margin-top:2px">发信人模板与个人介绍</p>
                                 </div>
                             </div>
-                            <button class="btn btn-accent btn-sm" onclick="openMaterialModal('personal_info')">+ 添加</button>
+                            <div style="display:flex;gap:8px">
+                                <button class="btn btn-accent btn-sm" onclick="openSenderInfoModal(null)">+ 发信人</button>
+                                <button class="btn btn-sm" style="background:var(--surface);border:1.5px solid var(--border)" onclick="openMaterialModal('personal_info')">+ 个人资料</button>
+                            </div>
                         </div>
                         <div class="material-grid" id="material-grid-personal" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
                             <div class="cell-muted" style="text-align:center;padding:40px 20px">加载中...</div>
@@ -3923,14 +3909,14 @@
         'personal_info': '个人信息', 'custom': '自定义'
     };
 
-    // 资料分区映射
+    // 资料分区映射（发信人模板归入个人信息区域）
     const MATERIAL_ZONES = {
-        'personal': ['personal_info'],
+        'personal': ['personal_info', 'sender_info'],
         'company': ['company_intro'],
         'product': ['advantage', 'brochure', 'case_study', 'storage', 'rule']
     };
     const ZONE_CONFIG = {
-        'personal': { title: '👤 个人信息', icon: '👤', desc: '发件人自我介绍、职位信息等', color: '#4a7de4' },
+        'personal': { title: '👤 个人信息', icon: '👤', desc: '发信人模板与个人介绍', color: '#4a7de4' },
         'company': { title: '🏢 公司简介', icon: '🏢', desc: '公司背景、主营业务、核心优势', color: '#c9943e' },
         'product': { title: '📦 产品资料', icon: '📦', desc: '产品优势、案例、宣传册、储能方案', color: '#2e7d32' }
     };
@@ -3939,7 +3925,6 @@
     };
 
     async function loadMaterials(page = 1) {
-        loadSenderInfoCard();
         materialPage = page;
         const search = document.getElementById('material-search').value;
         const type = document.getElementById('material-filter-type').value;
@@ -3957,7 +3942,7 @@
             document.getElementById('material-stats').innerHTML = `
                 <div class="stat-card"><div class="label">资料总数</div><div class="value c-accent">${stats.total}</div></div>
                 <div class="stat-card"><div class="label">已启用</div><div class="value c-teal">${stats.active}</div></div>
-                <div class="stat-card"><div class="label">个人信息</div><div class="value c-blue">${tc.personal_info || 0}</div></div>
+                <div class="stat-card"><div class="label">个人信息</div><div class="value c-blue">${(tc.personal_info||0)+(tc.sender_info||0)}</div></div>
                 <div class="stat-card"><div class="label">公司简介</div><div class="value c-gold">${tc.company_intro || 0}</div></div>
                 <div class="stat-card"><div class="label">产品资料</div><div class="value c-purple">${(tc.advantage||0)+(tc.brochure||0)+(tc.case_study||0)+(tc.storage||0)+(tc.rule||0)}</div></div>
             `;
@@ -4028,7 +4013,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border-light);padding-top:10px;margin-top:10px">
                         <span style="font-size:0.72rem;color:var(--text-3)">${m.user_id ? '个人' : '系统'}</span>
                         <div style="display:flex;gap:6px">
-                            <button class="btn btn-ghost btn-sm" style="font-size:0.72rem;padding:4px 10px" onclick="editMaterial(${m.id})">编辑</button>
+                            <button class="btn btn-ghost btn-sm" style="font-size:0.72rem;padding:4px 10px" onclick="openSenderInfoModal(${m.id})">编辑</button>
                             <button class="btn btn-ghost btn-sm" style="font-size:0.72rem;padding:4px 10px;color:var(--accent)" onclick="deleteMaterial(${m.id})">删除</button>
                         </div>
                     </div>
