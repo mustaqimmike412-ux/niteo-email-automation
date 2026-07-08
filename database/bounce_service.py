@@ -101,49 +101,61 @@ def update_email_log_bounce(recipient_email: str, bounce_type: str,
         conn.close()
 
 
-def get_bounce_stats() -> dict:
+def get_bounce_stats(user_id: int = None, admin: bool = False) -> dict:
     """获取退信统计"""
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        user_where = ""
+        user_params = []
+        if not admin and user_id:
+            user_where = " AND (user_id = ? OR user_id IS NULL)"
+            user_params = [user_id]
+
         # 总退信
-        cursor.execute('SELECT COUNT(*) FROM bounce_logs')
+        cursor.execute(f"SELECT COUNT(*) FROM bounce_logs WHERE 1=1{user_where}", user_params)
         total = cursor.fetchone()[0]
 
         # 硬退信
-        cursor.execute("SELECT COUNT(*) FROM bounce_logs WHERE bounce_type = 'hard'")
+        cursor.execute(f"SELECT COUNT(*) FROM bounce_logs WHERE bounce_type = 'hard'{user_where}", user_params)
         hard = cursor.fetchone()[0]
 
         # 软退信
-        cursor.execute("SELECT COUNT(*) FROM bounce_logs WHERE bounce_type = 'soft'")
+        cursor.execute(f"SELECT COUNT(*) FROM bounce_logs WHERE bounce_type = 'soft'{user_where}", user_params)
         soft = cursor.fetchone()[0]
 
         # 今日退信
-        cursor.execute("SELECT COUNT(*) FROM bounce_logs WHERE date(created_at) = date('now')")
+        cursor.execute(f"SELECT COUNT(*) FROM bounce_logs WHERE date(created_at) = date('now'){user_where}", user_params)
         today = cursor.fetchone()[0]
 
         # 退信率
-        cursor.execute("SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent'")
+        sent_where = ""
+        sent_params = []
+        if not admin and user_id:
+            sent_where = " AND (user_id = ? OR user_id IS NULL)"
+            sent_params = [user_id]
+        cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent'{sent_where}", sent_params)
         total_sent = cursor.fetchone()[0]
         rate = round(total / total_sent * 100, 1) if total_sent > 0 else 0
 
         # TOP 5 退信原因
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT diagnostic_code, COUNT(*) as cnt
             FROM bounce_logs
-            WHERE diagnostic_code IS NOT NULL AND diagnostic_code != ''
+            WHERE diagnostic_code IS NOT NULL AND diagnostic_code != ''{user_where}
             GROUP BY diagnostic_code
             ORDER BY cnt DESC LIMIT 5
-        ''')
+        ''', user_params)
         top_reasons = [{'code': r[0], 'count': r[1]} for r in cursor.fetchall()]
 
         # TOP 5 退信域名
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT substr(recipient_email, instr(recipient_email, '@') + 1) as domain, COUNT(*) as cnt
             FROM bounce_logs
+            WHERE 1=1{user_where}
             GROUP BY domain
             ORDER BY cnt DESC LIMIT 5
-        ''')
+        ''', user_params)
         top_domains = [{'domain': r[0], 'count': r[1]} for r in cursor.fetchall()]
 
         conn.close()
@@ -164,18 +176,23 @@ def get_bounce_stats() -> dict:
                 'top_reasons': [], 'top_domains': []}
 
 
-def get_bounce_list(page: int = 1, per_page: int = 20, bounce_type: str = '') -> dict:
+def get_bounce_list(page: int = 1, per_page: int = 20, bounce_type: str = '', user_id: int = None, admin: bool = False) -> dict:
     """获取退信列表"""
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        where = ''
+        where_clauses = []
         params = []
         if bounce_type:
-            where = 'WHERE bounce_type = ?'
-            params = [bounce_type]
+            where_clauses.append('bounce_type = ?')
+            params.append(bounce_type)
+        if not admin and user_id:
+            where_clauses.append('(b.user_id = ? OR b.user_id IS NULL)')
+            params.append(user_id)
 
-        cursor.execute(f'SELECT COUNT(*) FROM bounce_logs {where}', params)
+        where = 'WHERE ' + ' AND '.join(where_clauses) if where_clauses else ''
+
+        cursor.execute(f'SELECT COUNT(*) FROM bounce_logs b {where}', params)
         total = cursor.fetchone()[0]
 
         offset = (page - 1) * per_page

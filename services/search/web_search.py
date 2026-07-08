@@ -61,22 +61,25 @@ class WebSearcher(BaseSearcher):
         if not self.is_available():
             return []
 
-        search_query = f"{query} {location}".strip() if location else query
+        # 产品关键词搜索：不混入 location 文字
+        # location 仅通过 DuckDuckGo 的 region 参数限定搜索区域
+        search_query = query
+        region = self._location_to_region(location) if location else 'wt-wt'
 
         if self.engine == 'duckduckgo':
-            return self._search_duckduckgo(search_query, max_results)
+            return self._search_duckduckgo(search_query, max_results, region)
         elif self.engine == 'serpapi':
-            return self._search_serpapi(search_query, max_results)
+            return self._search_serpapi(search_query, max_results, location)
         elif self.engine == 'google':
             return self._search_google(search_query, max_results)
         return []
 
-    def _search_duckduckgo(self, query: str, max_results: int) -> List[SearchResult]:
+    def _search_duckduckgo(self, query: str, max_results: int, region: str = 'wt-wt') -> List[SearchResult]:
         """使用DuckDuckGo搜索"""
         try:
             from ddgs import DDGS
             with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=max_results))
+                results = list(ddgs.text(query, max_results=max_results, region=region))
         except ImportError:
             print("[WebSearcher] ddgs未安装，尝试: pip install ddgs")
             return []
@@ -99,7 +102,7 @@ class WebSearcher(BaseSearcher):
             ))
         return self._clean_search_results(search_results)
 
-    def _search_serpapi(self, query: str, max_results: int) -> List[SearchResult]:
+    def _search_serpapi(self, query: str, max_results: int, location: str = '') -> List[SearchResult]:
         """使用SerpAPI搜索"""
         url = "https://serpapi.com/search"
         params = {
@@ -108,6 +111,9 @@ class WebSearcher(BaseSearcher):
             'api_key': self.serpapi_key,
             'num': min(max_results, 100),
         }
+        if location:
+            params['location'] = location
+            params['gl'] = location  # geolocation
         try:
             resp = requests.get(url, params=params, timeout=30)
             resp.raise_for_status()
@@ -202,3 +208,73 @@ class WebSearcher(BaseSearcher):
                 seen.add(e)
                 filtered.append(e)
         return filtered
+
+    @staticmethod
+    def _location_to_region(location: str) -> str:
+        """
+        将用户输入的 location 转换为 DuckDuckGo 的 region 参数
+        格式: XX-YY (语言-地区)
+        参考: https://duckduckgo.com/duckduckgo-help-pages/results/param-depth/
+        """
+        if not location:
+            return 'wt-wt'
+
+        loc = location.lower().strip()
+        mapping = {
+            'usa': 'us-en', 'us': 'us-en', 'united states': 'us-en', 'america': 'us-en',
+            'uk': 'uk-en', 'united kingdom': 'uk-en', 'britain': 'uk-en', 'england': 'uk-en',
+            'germany': 'de-de', 'deutschland': 'de-de',
+            'france': 'fr-fr',
+            'china': 'cn-zh', 'chinese': 'cn-zh',
+            'india': 'in-en',
+            'japan': 'jp-jp',
+            'australia': 'au-en',
+            'canada': 'ca-en',
+            'italy': 'it-it',
+            'spain': 'es-es',
+            'brazil': 'pt-br', 'brasil': 'pt-br',
+            'mexico': 'mx-es',
+            'south korea': 'kr-ko', 'korea': 'kr-ko',
+            'netherlands': 'nl-nl',
+            'turkey': 'tr-tr',
+            'thailand': 'th-th',
+            'vietnam': 'vi-vi',
+            'indonesia': 'id-id',
+            'malaysia': 'ms-ms',
+            'singapore': 'sg-en',
+            'uae': 'ae-ar', 'dubai': 'ae-ar',
+            'saudi arabia': 'sa-ar',
+            'russia': 'ru-ru',
+            'poland': 'pl-pl',
+            'switzerland': 'ch-de',
+            'sweden': 'se-sv',
+            'norway': 'no-no',
+            'denmark': 'dk-da',
+            'finland': 'fi-fi',
+            'ireland': 'ie-en',
+            'austria': 'at-de',
+            'belgium': 'be-fr',
+            'portugal': 'pt-pt',
+            'argentina': 'ar-es',
+            'south africa': 'za-en',
+            'egypt': 'eg-ar',
+            'philippines': 'tl-en',
+            'colombia': 'co-es',
+            'chile': 'cl-es',
+            'israel': 'il-he',
+            'new zealand': 'nz-en',
+            'taiwan': 'tw-zh',
+            'hong kong': 'hk-tzh',
+            'europe': 'eu-en',
+        }
+
+        # 精确匹配
+        if loc in mapping:
+            return mapping[loc]
+
+        # 模糊匹配
+        for key, region in mapping.items():
+            if key in loc or loc in key:
+                return region
+
+        return 'wt-wt'

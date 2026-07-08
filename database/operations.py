@@ -122,38 +122,44 @@ def get_send_task_items(task_id):
         return []
 
 
-def get_statistics():
+def get_statistics(user_id=None, admin=False):
     """获取数据库统计信息"""
     conn = get_connection()
     cursor = conn.cursor()
 
     stats = {}
 
+    user_where = ""
+    user_params = []
+    if not admin and user_id:
+        user_where = " WHERE (user_id = ? OR user_id IS NULL)"
+        user_params = [user_id]
+
     # 客户总数
-    cursor.execute("SELECT COUNT(*) FROM customers")
+    cursor.execute(f"SELECT COUNT(*) FROM customers{user_where}", user_params)
     stats['customer_count'] = cursor.fetchone()[0]
 
     # 联系人总数
-    cursor.execute("SELECT COUNT(*) FROM contacts")
+    cursor.execute(f"SELECT COUNT(*) FROM contacts{user_where}", user_params)
     stats['contact_count'] = cursor.fetchone()[0]
 
     # 邮箱总数
-    cursor.execute("SELECT COUNT(*) FROM emails")
+    cursor.execute(f"SELECT COUNT(*) FROM emails{user_where}", user_params)
     stats['email_count'] = cursor.fetchone()[0]
 
     # 邮箱类型分布
-    cursor.execute("SELECT email_type, COUNT(*) FROM emails GROUP BY email_type")
+    cursor.execute(f"SELECT email_type, COUNT(*) FROM emails{user_where} GROUP BY email_type", user_params)
     stats['email_types'] = cursor.fetchall()
 
     # 联系人来源分布
-    cursor.execute("SELECT source, COUNT(*) FROM contacts GROUP BY source")
+    cursor.execute(f"SELECT source, COUNT(*) FROM contacts{user_where} GROUP BY source", user_params)
     stats['contact_sources'] = cursor.fetchall()
 
     # 邮件发送统计
-    cursor.execute("SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent'")
+    cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent'{(' AND (user_id = ? OR user_id IS NULL)' if not admin and user_id else '')}", user_params if not admin and user_id else [])
     stats['sent_count'] = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM email_logs WHERE send_status = 'failed'")
+    cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'failed'{(' AND (user_id = ? OR user_id IS NULL)' if not admin and user_id else '')}", user_params if not admin and user_id else [])
     stats['failed_count'] = cursor.fetchone()[0]
 
     conn.close()

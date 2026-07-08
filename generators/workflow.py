@@ -538,9 +538,10 @@ class FABETransformer:
 class MaterialMatcher:
     """节点5: 素材库智能匹配 - 按规则调用完整素材库"""
     
-    def match(self, classification: Dict, research_result: Dict) -> Dict:
+    def match(self, classification: Dict, research_result: Dict,
+              selected_material_ids: list = None, user_id: int = None) -> Dict:
         """
-        按规则匹配素材
+        按规则匹配素材，支持用户手动选择素材注入
         """
         print(f"\n[节点5] 素材库智能匹配（调用完整素材库）")
         
@@ -554,11 +555,25 @@ class MaterialMatcher:
             'brochure': get_brochure_by_power_type(power_type),
             'cases': get_cases_by_track(track),
             'rules': get_case_workflow_rules(track, regions[0] if regions else ''),
+            'custom_selected': [],
         }
         
         # 大功率客户额外获取储能素材
         if '大功率' in power_type:
             matched['storage'] = get_storage_brochure()
+        
+        # 用户手动选择的素材（最高优先级）
+        if selected_material_ids:
+            from database.material_models import get_material_by_id
+            for mid in selected_material_ids:
+                try:
+                    m = get_material_by_id(mid, user_id=user_id)
+                    if m and m.get('content_json'):
+                        matched['custom_selected'].append(m['content_json'])
+                except Exception as e:
+                    print(f"  ⚠ 加载选中素材 {mid} 失败: {e}")
+            if matched['custom_selected']:
+                print(f"  用户选中素材: {len(matched['custom_selected'])} 项")
         
         # 获取案例调用规则
         rules = matched['rules']
@@ -581,22 +596,15 @@ class MaterialMatcher:
 class EmailComposer:
     """节点6: 开发信生成 - 整合信息生成高精准度英文开发信"""
     
-    def __init__(self):
-        self.sender_info = self._load_sender_info()
+    def __init__(self, user_id: int = None):
+        """初始化邮件撰写器，支持 per-user 发信人信息"""
+        from materials.sender_info_service import get_sender_info
+        self.sender_info = get_sender_info(user_id=user_id)
     
     def _load_sender_info(self) -> Dict:
-        """加载发件人信息"""
-        config_path = os.path.join(os.path.dirname(__file__), 'config', 'company_info.json')
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {
-            'sender_name': 'Travis',
-            'job_title': 'Business Development Manager',
-            'company_name': 'Niteo Solar',
-            'email': 'travis@niteowork.com',
-            'website': 'www.niteosolar.com'
-        }
+        """加载发件人信息（兼容旧版）"""
+        from materials.sender_info_service import get_sender_info
+        return get_sender_info()
     
     def compose(self, research_result: Dict, classification: Dict,
                 fabe_points: List[Dict], materials: Dict,
@@ -1144,13 +1152,14 @@ class EmailWorkflow:
     整合8个节点，提供一键生成开发信的功能
     """
     
-    def __init__(self):
+    def __init__(self, user_id: int = None):
+        self.user_id = user_id
         self.researcher = CompanyResearcher()
         self.classifier = CustomerClassifier()
         self.advantage_selector = AdvantageSelector()
         self.fabe_transformer = FABETransformer()
         self.material_matcher = MaterialMatcher()
-        self.composer = EmailComposer()
+        self.composer = EmailComposer(user_id=user_id)
         self.refiner = EmailRefiner()
         self.renderer = HTMLRenderer()
         self.llm = LLMEmailClient()
@@ -1350,7 +1359,11 @@ class EmailWorkflow:
             print(f"  ✓ LLM 素材匹配成功")
         else:
             print(f"  ⚠ LLM 素材匹配失败，回退到规则引擎")
-            materials = self.material_matcher.match(classification, research_result)
+            materials = self.material_matcher.match(
+                classification, research_result,
+                selected_material_ids=selected_material_ids,
+                user_id=self.user_id
+            )
         _notify('material', 'completed')
 
         # ===== 节点6: 邮件生成（LLM）=====
@@ -1424,7 +1437,9 @@ class EmailWorkflow:
             'fabe_points': fabe_points
         }
 
-    def generate_email(self, customer_name: str, website: str, progress_callback=None, target_word_count=None) -> Dict:
+    def generate_email(self, customer_name: str, website: str,
+                        progress_callback=None, target_word_count=None,
+                        selected_material_ids: list = None) -> Dict:
         """
         一键生成开发信
 
@@ -1433,6 +1448,7 @@ class EmailWorkflow:
             website: 客户官网URL（可为空字符串）
             progress_callback: 进度回调函数，接收(step_id, status)参数
             target_word_count: 目标字数范围 {'min': int, 'max': int}
+            selected_material_ids: 用户手动选中的素材ID列表
 
         Returns:
             包含主题、正文、HTML的完整邮件字典
@@ -1490,7 +1506,11 @@ class EmailWorkflow:
         fabe_points = self.fabe_transformer.transform(advantages, classification, research_result)
 
         # 节点5: 素材库智能匹配
-        materials = self.material_matcher.match(classification, research_result)
+        materials = self.material_matcher.match(
+            classification, research_result,
+            selected_material_ids=selected_material_ids,
+            user_id=self.user_id
+        )
 
         # 节点6: 开发信生成（传入 has_website 控制措辞）
         email = self.composer.compose(research_result, classification, fabe_points, materials, has_website=has_website)

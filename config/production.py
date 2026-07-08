@@ -40,5 +40,10 @@ API_CONFIGS = {
     'google_places_api_key': os.environ.get('GOOGLE_PLACES_API_KEY', '')
 }
 
+# Google OAuth 配置
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+OAUTH_REDIRECT_URI = os.environ.get('OAUTH_REDIRECT_URI', 'https://exim-flow.com/auth/google/callback')
+
 # 发送间隔（秒）
 SEND_INTERVAL = int(os.environ.get('SEND_INTERVAL', 120))

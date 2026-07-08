@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, session, redirect
 from flask_wtf.csrf import CSRFProtect
 
 # 确保能导入项目根目录模块
@@ -117,11 +117,46 @@ from database.api_config_models import (
     init_default_configs
 )
 from database.bounce_service import get_bounce_stats, get_bounce_list
+from web.auth import auth_bp, init_oauth, login_required, admin_required
 
 app = Flask(__name__, static_folder='dashboard', static_url_path='')
-app.config['SECRET_KEY'] = os.urandom(32)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 app.config['WTF_CSRF_ENABLED'] = False  # 禁用全局CSRF，API通过 X-Requested-With 请求头验证保护
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+
+# 注册认证 Blueprint
+app.register_blueprint(auth_bp)
+init_oauth(app)
+
+# ==================== 全局认证拦截 ====================
+PUBLIC_PATHS = {
+    '/login.html', '/login/google', '/auth/google/callback', '/logout', '/api/me',
+    '/api/admin/users', '/api/admin/stats',
+    '/api/admin/send-queue/status', '/api/admin/search-tasks/summary', '/api/admin/system/health',
+    '/api/invite/validate', '/login/invite'
+}
+
+@app.before_request
+def require_auth():
+    """未登录用户强制跳转到登录页"""
+    path = request.path
+    # 静态资源放行
+    if path.startswith('/static/') or path.startswith('/assets/') or '.' in path.split('/')[-1]:
+        return None
+    if path in PUBLIC_PATHS or path.startswith('/auth/'):
+        return None
+    if 'user_id' not in session:
+        if request.is_json or path.startswith('/api/'):
+            return jsonify({'error': 'Unauthorized', 'login_url': '/login.html'}), 401
+        return redirect('/login.html')
+
+def get_current_user_id() -> int:
+    """获取当前登录用户的ID，未登录返回0"""
+    return session.get('user_id', 0)
+
+def is_admin() -> bool:
+    """检查当前用户是否为管理员"""
+    return session.get('role', '') == 'admin' or session.get('user_role', '') == 'admin'
 
 # ==================== Security Headers ====================
 
@@ -134,7 +169,7 @@ def add_security_headers(response):
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.bootcdn.net; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "connect-src 'self'; "
@@ -152,32 +187,46 @@ def index():
     resp.headers['Expires'] = '0'
     return resp
 
+@app.route('/login.html')
+def login_page():
+    resp = send_from_directory(os.path.join(_project_root, 'dashboard'), 'login.html')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
+
 @app.route('/api/stats')
 def api_stats():
     """获取系统统计数据"""
     try:
-        stats = get_statistics()
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        stats = get_statistics(user_id=current_user_id, admin=admin)
         conn = get_connection()
         cursor = conn.cursor()
-        
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND (user_id = ? OR user_id IS NULL)"
+            user_params = [current_user_id]
+
         # 今日发送
-        cursor.execute("SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent' AND date(sent_at) = date('now')")
+        cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent' AND date(sent_at) = date('now'){user_where}", user_params)
         today_sent = cursor.fetchone()[0]
-        
+
         # 主题池统计
-        cursor.execute("SELECT COUNT(DISTINCT customer_id) FROM customer_subjects")
+        cursor.execute(f"SELECT COUNT(DISTINCT customer_id) FROM customer_subjects WHERE 1=1{user_where}", user_params)
         customers_with_subjects = cursor.fetchone()[0]
-        
+
         # 调度队列状态
-        cursor.execute("SELECT COUNT(*) FROM send_schedule WHERE status = 'pending'")
+        cursor.execute(f"SELECT COUNT(*) FROM send_schedule WHERE status = 'pending'{user_where}", user_params)
         pending_schedule = cursor.fetchone()[0]
-        
+
         # 邮箱类型分布
-        cursor.execute("SELECT email_type, COUNT(*) FROM emails GROUP BY email_type")
+        cursor.execute(f"SELECT email_type, COUNT(*) FROM emails WHERE 1=1{user_where} GROUP BY email_type", user_params)
         email_types = dict(cursor.fetchall())
-        
+
         conn.close()
-        
+
         return jsonify({
             'success': True,
             'data': {
@@ -208,9 +257,15 @@ def api_customers():
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         # 构建 WHERE 条件
         where_clauses = []
         params = []
+        if not admin and current_user_id:
+            where_clauses.append('(c.user_id = ? OR c.user_id IS NULL)')
+            params.append(current_user_id)
         if search:
             where_clauses.append('c.customer_name LIKE ?')
             params.append(f'%{search}%')
@@ -278,13 +333,23 @@ def api_customer_countries():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND (user_id = ? OR user_id IS NULL)"
+            user_params = [current_user_id]
+
+        cursor.execute(f'''
             SELECT country, COUNT(*) as count
             FROM customers
-            WHERE country IS NOT NULL AND country != ''
+            WHERE country IS NOT NULL AND country != ''{user_where}
             GROUP BY country
             ORDER BY count DESC, country
-        ''')
+        ''', user_params)
         rows = cursor.fetchall()
         conn.close()
         return jsonify({
@@ -301,9 +366,15 @@ def api_customer_detail(customer_id):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        
+
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         # 客户基本信息
-        cursor.execute('SELECT id, customer_name, country, address, website, company_info, industry_type, website_title, website_description FROM customers WHERE id = ?', (customer_id,))
+        if not admin and current_user_id:
+            cursor.execute('SELECT id, customer_name, country, address, website, company_info, industry_type, website_title, website_description FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)', (customer_id, current_user_id))
+        else:
+            cursor.execute('SELECT id, customer_name, country, address, website, company_info, industry_type, website_title, website_description FROM customers WHERE id = ?', (customer_id,))
         row = cursor.fetchone()
         if not row:
             conn.close()
@@ -379,15 +450,22 @@ def api_customer_update(customer_id):
         data = request.json or {}
 
         # 验证数据
-        is_valid, errors = validate_customer_data(data, is_update=True, customer_id=customer_id)
+        current_user_id = get_current_user_id()
+        is_valid, errors = validate_customer_data(data, is_update=True, customer_id=customer_id, user_id=current_user_id)
         if not is_valid:
             return jsonify({'success': False, 'error': '数据验证失败', 'details': errors}), 400
 
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         # 检查客户是否存在
-        cursor.execute("SELECT id FROM customers WHERE id = ?", (customer_id,))
+        if not admin and current_user_id:
+            cursor.execute("SELECT id FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (customer_id, current_user_id))
+        else:
+            cursor.execute("SELECT id FROM customers WHERE id = ?", (customer_id,))
         if not cursor.fetchone():
             conn.close()
             return jsonify({'success': False, 'error': '客户不存在'}), 404
@@ -403,11 +481,14 @@ def api_customer_update(customer_id):
         if updates:
             updates.append("updated_at = datetime('now')")
             params.append(customer_id)
-            cursor.execute(f"UPDATE customers SET {', '.join(updates)} WHERE id = ?", params)
+            if not admin and current_user_id:
+                cursor.execute(f"UPDATE customers SET {', '.join(updates)} WHERE id = ? AND (user_id = ? OR user_id IS NULL)", params + [current_user_id])
+            else:
+                cursor.execute(f"UPDATE customers SET {', '.join(updates)} WHERE id = ?", params)
             conn.commit()
 
         conn.close()
-        return jsonify({'success': True, 'message': '客户信息已更新'})
+        return jsonify({'success': True, 'data': {'updated': True}, 'message': '客户信息已更新'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -420,18 +501,21 @@ def api_customer_create():
         data = request.json or {}
 
         # 验证数据
-        is_valid, errors = validate_customer_data(data, is_update=False)
+        current_user_id = get_current_user_id()
+        is_valid, errors = validate_customer_data(data, is_update=False, user_id=current_user_id)
         if not is_valid:
             return jsonify({'success': False, 'error': '数据验证失败', 'details': errors}), 400
 
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+
         # 插入客户
         cursor.execute("""
             INSERT INTO customers (customer_name, country, address, website, company_info,
-                supplier, supplier_info, customs_data, logistics_info, industry_type, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                supplier, supplier_info, customs_data, logistics_info, industry_type, user_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
         """, (
             sanitize_text(data.get('customer_name')),
             sanitize_text(data.get('country')),
@@ -442,7 +526,8 @@ def api_customer_create():
             sanitize_text(data.get('supplier_info')),
             sanitize_text(data.get('customs_data')),
             sanitize_text(data.get('logistics_info')),
-            sanitize_text(data.get('industry_type'))
+            sanitize_text(data.get('industry_type')),
+            current_user_id
         ))
 
         customer_id = cursor.lastrowid
@@ -462,17 +547,17 @@ def api_customer_create():
             contact_id = None
             if contact_name:
                 cursor.execute("""
-                    INSERT INTO contacts (customer_id, contact_name, job_title, source, created_at)
-                    VALUES (?, ?, ?, ?, datetime('now'))
-                """, (customer_id, contact_name, job_title, email_data.get('source', 'manual')))
+                    INSERT INTO contacts (customer_id, contact_name, job_title, source, user_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, datetime('now'))
+                """, (customer_id, contact_name, job_title, email_data.get('source', 'manual'), current_user_id))
                 contact_id = cursor.lastrowid
 
             # 插入邮箱（同时保存contact_name和job_title到emails表）
             cursor.execute("""
                 INSERT INTO emails (customer_id, contact_id, email_address, email_type,
-                                    contact_name, job_title, is_active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))
-            """, (customer_id, contact_id, email_addr, email_type, contact_name, job_title))
+                                    contact_name, job_title, is_active, user_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, datetime('now'))
+            """, (customer_id, contact_id, email_addr, email_type, contact_name, job_title, current_user_id))
 
         conn.commit()
         conn.close()
@@ -494,8 +579,14 @@ def api_customer_delete(customer_id):
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         # 查询客户信息
-        cursor.execute("SELECT id, customer_name FROM customers WHERE id = ?", (customer_id,))
+        if not admin and current_user_id:
+            cursor.execute("SELECT id, customer_name FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (customer_id, current_user_id))
+        else:
+            cursor.execute("SELECT id, customer_name FROM customers WHERE id = ?", (customer_id,))
         row = cursor.fetchone()
         if not row:
             conn.close()
@@ -504,7 +595,10 @@ def api_customer_delete(customer_id):
         customer_name = row[1]
 
         # 删除客户（外键CASCADE会自动清理关联数据）
-        cursor.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        if not admin and current_user_id:
+            cursor.execute("DELETE FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (customer_id, current_user_id))
+        else:
+            cursor.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
         conn.commit()
         conn.close()
 
@@ -533,10 +627,16 @@ def api_customers_batch_delete():
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         # 查询要删除的客户名称
         # 注意: f-string 仅用于生成占位符 ?,?,?，实际参数通过 execute() 传递，安全
         placeholders = ','.join('?' * len(ids))
-        cursor.execute(f"SELECT id, customer_name FROM customers WHERE id IN ({placeholders})", ids)
+        if not admin and current_user_id:
+            cursor.execute(f"SELECT id, customer_name FROM customers WHERE id IN ({placeholders}) AND (user_id = ? OR user_id IS NULL)", ids + [current_user_id])
+        else:
+            cursor.execute(f"SELECT id, customer_name FROM customers WHERE id IN ({placeholders})", ids)
         customers_to_delete = cursor.fetchall()
 
         if not customers_to_delete:
@@ -545,7 +645,10 @@ def api_customers_batch_delete():
 
         # 执行删除
         # 注意: f-string 仅用于生成占位符 ?,?,?，实际参数通过 execute() 传递，安全
-        cursor.execute(f"DELETE FROM customers WHERE id IN ({placeholders})", ids)
+        if not admin and current_user_id:
+            cursor.execute(f"DELETE FROM customers WHERE id IN ({placeholders}) AND (user_id = ? OR user_id IS NULL)", ids + [current_user_id])
+        else:
+            cursor.execute(f"DELETE FROM customers WHERE id IN ({placeholders})", ids)
         deleted_count = cursor.rowcount
         conn.commit()
         conn.close()
@@ -597,6 +700,8 @@ def api_customers_import():
             conn = get_connection()
             cursor = conn.cursor()
 
+            current_user_id = get_current_user_id()
+
             success_count = 0
             fail_count = 0
             fail_details = []
@@ -610,7 +715,7 @@ def api_customers_import():
                         continue
 
                     # 检查重复
-                    is_dup, dup_id = check_duplicate_customer_name(customer_data['customer_name'])
+                    is_dup, dup_id = check_duplicate_customer_name(customer_data['customer_name'], user_id=current_user_id)
                     if is_dup:
                         fail_count += 1
                         fail_details.append({
@@ -622,8 +727,8 @@ def api_customers_import():
                     # 插入客户
                     cursor.execute("""
                         INSERT INTO customers (customer_name, country, address, website, company_info,
-                            supplier, supplier_info, customs_data, logistics_info, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                            supplier, supplier_info, customs_data, logistics_info, user_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
                     """, (
                         customer_data.get('customer_name', ''),
                         customer_data.get('country', ''),
@@ -633,7 +738,8 @@ def api_customers_import():
                         customer_data.get('supplier', ''),
                         customer_data.get('supplier_info', ''),
                         customer_data.get('customs_data', ''),
-                        customer_data.get('logistics_info', '')
+                        customer_data.get('logistics_info', ''),
+                        current_user_id
                     ))
 
                     customer_id = cursor.lastrowid
@@ -658,17 +764,17 @@ def api_customers_import():
                         contact_id = None
                         if contact_name:
                             cursor.execute("""
-                                INSERT INTO contacts (customer_id, contact_name, job_title, source, created_at)
-                                VALUES (?, ?, ?, ?, datetime('now'))
-                            """, (customer_id, contact_name, job_title, source))
+                                INSERT INTO contacts (customer_id, contact_name, job_title, source, user_id, created_at)
+                                VALUES (?, ?, ?, ?, ?, datetime('now'))
+                            """, (customer_id, contact_name, job_title, source, current_user_id))
                             contact_id = cursor.lastrowid
 
                         # 插入邮箱（同时保存contact_name和job_title）
                         cursor.execute("""
                             INSERT INTO emails (customer_id, contact_id, email_address, email_type,
-                                                contact_name, job_title, is_active, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))
-                        """, (customer_id, contact_id, email_addr, email_type, contact_name, job_title))
+                                                contact_name, job_title, is_active, user_id, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, 1, ?, datetime('now'))
+                        """, (customer_id, contact_id, email_addr, email_type, contact_name, job_title, current_user_id))
 
                     success_count += 1
 
@@ -709,15 +815,17 @@ def api_check_duplicate():
         name = request.args.get('name', '').strip()
         email = request.args.get('email', '').strip()
 
+        current_user_id = get_current_user_id()
+
         result = {'name_duplicate': False, 'email_duplicate': False}
 
         if name:
-            is_dup, dup_id = check_duplicate_customer_name(name)
+            is_dup, dup_id = check_duplicate_customer_name(name, user_id=current_user_id)
             result['name_duplicate'] = is_dup
             result['name_duplicate_id'] = dup_id
 
         if email:
-            is_dup, dup_info = check_duplicate_email(email)
+            is_dup, dup_info = check_duplicate_email(email, user_id=current_user_id)
             result['email_duplicate'] = is_dup
             if dup_info:
                 result['email_duplicate_info'] = dup_info
@@ -736,7 +844,9 @@ def api_get_blacklist():
     """获取拉黑列表"""
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
-    data = get_blacklist(page=page, per_page=per_page)
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    data = get_blacklist(page=page, per_page=per_page, user_id=current_user_id, admin=admin)
     return jsonify({'success': True, **data})
 
 
@@ -750,7 +860,8 @@ def api_add_blacklist():
     reason = data.get('reason', '').strip()
     if not company_name:
         return jsonify({'success': False, 'error': '公司名称不能为空'}), 400
-    if add_blacklist(company_name, website, reason):
+    current_user_id = get_current_user_id()
+    if add_blacklist(company_name, website, reason, user_id=current_user_id):
         return jsonify({'success': True, 'message': '已拉黑'})
     return jsonify({'success': False, 'error': '拉黑失败'}), 500
 
@@ -764,7 +875,9 @@ def api_remove_blacklist():
     website = data.get('website', '').strip()
     if not company_name:
         return jsonify({'success': False, 'error': '公司名称不能为空'}), 400
-    if remove_blacklist(company_name, website):
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    if remove_blacklist(company_name, website, user_id=current_user_id, admin=admin):
         return jsonify({'success': True, 'message': '已取消拉黑'})
     return jsonify({'success': False, 'error': '取消拉黑失败'}), 500
 
@@ -775,7 +888,9 @@ def api_check_blacklist():
     """检查是否在拉黑列表"""
     name = request.args.get('company_name', '').strip()
     website = request.args.get('website', '').strip()
-    return jsonify({'success': True, 'blacklisted': is_blacklisted(name, website)})
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    return jsonify({'success': True, 'blacklisted': is_blacklisted(name, website, user_id=current_user_id, admin=admin)})
 
 
 # ============ 退信管理 ============
@@ -784,7 +899,9 @@ def api_check_blacklist():
 @require_ajax
 def api_bounce_stats():
     """获取退信统计"""
-    stats = get_bounce_stats()
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    stats = get_bounce_stats(user_id=current_user_id, admin=admin)
     return jsonify({'success': True, 'data': stats})
 
 
@@ -795,7 +912,9 @@ def api_bounce_list():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
     bounce_type = request.args.get('type', '')
-    data = get_bounce_list(page, per_page, bounce_type)
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    data = get_bounce_list(page, per_page, bounce_type, user_id=current_user_id, admin=admin)
     return jsonify({'success': True, 'data': data})
 
 
@@ -833,7 +952,9 @@ def api_bounce_connection():
 @require_ajax
 def api_get_configs():
     """获取所有 API 配置"""
-    configs = get_all_api_configs()
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    configs = get_all_api_configs(user_id=current_user_id, admin=admin)
     return jsonify({'success': True, 'configs': configs})
 
 
@@ -848,7 +969,8 @@ def api_create_config():
     model = data.get('model', '').strip()
     if not api_name or not api_key:
         return jsonify({'success': False, 'error': 'API名称和Key不能为空'}), 400
-    if create_api_config(api_name, api_key, base_url, model):
+    current_user_id = get_current_user_id()
+    if create_api_config(api_name, api_key, base_url, model, user_id=current_user_id):
         return jsonify({'success': True, 'message': '创建成功'})
     return jsonify({'success': False, 'error': '创建失败，名称可能已存在'}), 400
 
@@ -867,6 +989,10 @@ def api_update_config(api_name):
         kwargs['model'] = data['model'].strip()
     if 'is_active' in data:
         kwargs['is_active'] = data['is_active']
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    kwargs['user_id'] = current_user_id
+    kwargs['admin'] = admin
     if update_api_config(api_name, **kwargs):
         return jsonify({'success': True, 'message': '更新成功'})
     return jsonify({'success': False, 'error': '更新失败'}), 400
@@ -876,7 +1002,9 @@ def api_update_config(api_name):
 @require_ajax
 def api_delete_config(api_name):
     """删除 API 配置"""
-    if delete_api_config(api_name):
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    if delete_api_config(api_name, user_id=current_user_id, admin=admin):
         return jsonify({'success': True, 'message': '删除成功'})
     return jsonify({'success': False, 'error': '删除失败'}), 400
 
@@ -888,15 +1016,24 @@ def api_customer_emails(customer_id):
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("""
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = [customer_id]
+        if not admin and current_user_id:
+            user_where = " AND (e.user_id = ? OR e.user_id IS NULL)"
+            user_params.append(current_user_id)
+
+        cursor.execute(f"""
             SELECT e.id, e.email_address, e.email_type, e.is_active,
                    COALESCE(e.contact_name, co.contact_name) as contact_name,
                    COALESCE(e.job_title, co.job_title) as job_title
             FROM emails e
             LEFT JOIN contacts co ON e.contact_id = co.id
-            WHERE e.customer_id = ?
+            WHERE e.customer_id = ?{user_where}
             ORDER BY e.email_type, e.id
-        """, (customer_id,))
+        """, user_params)
 
         emails = [{
             'id': r[0], 'address': r[1], 'type': r[2], 'active': r[3],
@@ -932,14 +1069,20 @@ def api_customer_email_add(customer_id):
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         # 检查客户是否存在
-        cursor.execute("SELECT id FROM customers WHERE id = ?", (customer_id,))
+        if not admin and current_user_id:
+            cursor.execute("SELECT id FROM customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (customer_id, current_user_id))
+        else:
+            cursor.execute("SELECT id FROM customers WHERE id = ?", (customer_id,))
         if not cursor.fetchone():
             conn.close()
             return jsonify({'success': False, 'error': '客户不存在'}), 404
 
         # 检查该客户下是否已存在相同邮箱
-        is_dup, dup_info = check_duplicate_email(email_addr, customer_id)
+        is_dup, dup_info = check_duplicate_email(email_addr, customer_id, user_id=current_user_id)
         if is_dup:
             conn.close()
             return jsonify({'success': False, 'error': '该邮箱已存在于此客户'}), 400
@@ -948,17 +1091,17 @@ def api_customer_email_add(customer_id):
         contact_id = None
         if contact_name:
             cursor.execute("""
-                INSERT INTO contacts (customer_id, contact_name, job_title, source, created_at)
-                VALUES (?, ?, ?, ?, datetime('now'))
-            """, (customer_id, contact_name, job_title, 'manual'))
+                INSERT INTO contacts (customer_id, contact_name, job_title, source, user_id, created_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now'))
+            """, (customer_id, contact_name, job_title, 'manual', current_user_id))
             contact_id = cursor.lastrowid
 
         # 插入邮箱（同时保存contact_name和job_title）
         cursor.execute("""
             INSERT INTO emails (customer_id, contact_id, email_address, email_type,
-                                contact_name, job_title, is_active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))
-        """, (customer_id, contact_id, email_addr, email_type, contact_name, job_title))
+                                contact_name, job_title, is_active, user_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, datetime('now'))
+        """, (customer_id, contact_id, email_addr, email_type, contact_name, job_title, current_user_id))
 
         email_id = cursor.lastrowid
         conn.commit()
@@ -981,16 +1124,27 @@ def api_customer_email_delete(customer_id, email_id):
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
         # 验证邮箱属于该客户
-        cursor.execute("""
-            SELECT id FROM emails WHERE id = ? AND customer_id = ?
-        """, (email_id, customer_id))
+        if not admin and current_user_id:
+            cursor.execute("""
+                SELECT id FROM emails WHERE id = ? AND customer_id = ? AND (user_id = ? OR user_id IS NULL)
+            """, (email_id, customer_id, current_user_id))
+        else:
+            cursor.execute("""
+                SELECT id FROM emails WHERE id = ? AND customer_id = ?
+            """, (email_id, customer_id))
 
         if not cursor.fetchone():
             conn.close()
             return jsonify({'success': False, 'error': '邮箱不存在或不属于该客户'}), 404
 
-        cursor.execute("DELETE FROM emails WHERE id = ?", (email_id,))
+        if not admin and current_user_id:
+            cursor.execute("DELETE FROM emails WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (email_id, current_user_id))
+        else:
+            cursor.execute("DELETE FROM emails WHERE id = ?", (email_id,))
         conn.commit()
         conn.close()
 
@@ -1006,44 +1160,57 @@ def api_email_logs():
         per_page = request.args.get('per_page', 20, type=int)
         status_filter = request.args.get('status', '')
         offset = (page - 1) * per_page
-        
+
         conn = get_connection()
         cursor = conn.cursor()
-        
+
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND (el.user_id = ? OR el.user_id IS NULL)"
+            user_params = [current_user_id]
+
         if status_filter:
-            cursor.execute('''
-                SELECT el.id, c.customer_name, e.email_address, el.email_subject, 
+            cursor.execute(f'''
+                SELECT el.id, c.customer_name, e.email_address, el.email_subject,
                        el.send_status, el.sent_at, el.error_message
                 FROM email_logs el
                 JOIN customers c ON el.customer_id = c.id
                 JOIN emails e ON el.email_id = e.id
-                WHERE el.send_status = ?
+                WHERE el.send_status = ?{user_where}
                 ORDER BY el.sent_at DESC
                 LIMIT ? OFFSET ?
-            ''', (status_filter, per_page, offset))
+            ''', (status_filter,) + tuple(user_params) + (per_page, offset))
         else:
-            cursor.execute('''
-                SELECT el.id, c.customer_name, e.email_address, el.email_subject, 
+            cursor.execute(f'''
+                SELECT el.id, c.customer_name, e.email_address, el.email_subject,
                        el.send_status, el.sent_at, el.error_message
                 FROM email_logs el
                 JOIN customers c ON el.customer_id = c.id
                 JOIN emails e ON el.email_id = e.id
+                WHERE 1=1{user_where}
                 ORDER BY el.sent_at DESC
                 LIMIT ? OFFSET ?
-            ''', (per_page, offset))
-        
+            ''', tuple(user_params) + (per_page, offset))
+
         rows = cursor.fetchall()
-        
-        cursor.execute('SELECT COUNT(*) FROM email_logs')
+
+        if not admin and current_user_id:
+            cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE (user_id = ? OR user_id IS NULL)", (current_user_id,))
+        else:
+            cursor.execute('SELECT COUNT(*) FROM email_logs')
         total = cursor.fetchone()[0]
-        
+
         conn.close()
-        
+
         logs = [{
             'id': r[0], 'customer': r[1], 'email': r[2], 'subject': r[3],
             'status': r[4], 'sent_at': r[5], 'error': r[6]
         } for r in rows]
-        
+
         return jsonify({
             'success': True,
             'data': {
@@ -1063,39 +1230,50 @@ def api_subjects():
         conn = get_connection()
         cursor = conn.cursor()
 
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " WHERE (user_id = ? OR user_id IS NULL)"
+            user_params = [current_user_id]
+
         # 有主题池的客户数
-        cursor.execute('SELECT COUNT(DISTINCT customer_id) FROM customer_subjects')
+        cursor.execute(f'SELECT COUNT(DISTINCT customer_id) FROM customer_subjects{user_where}', user_params)
         with_subjects = cursor.fetchone()[0]
 
         # 无主题池的客户数
-        cursor.execute('SELECT COUNT(*) FROM customers')
+        cursor.execute(f'SELECT COUNT(*) FROM customers{user_where}', user_params)
         total_customers = cursor.fetchone()[0]
 
         # 主题类型分布
-        cursor.execute('SELECT subject_type, COUNT(*) FROM customer_subjects GROUP BY subject_type')
+        cursor.execute(f'SELECT subject_type, COUNT(*) FROM customer_subjects{user_where} GROUP BY subject_type', user_params)
         type_dist = dict(cursor.fetchall())
 
         # 使用历史
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT cs.subject_type, COUNT(*) as usage_count
             FROM subject_usage_log sul
             JOIN customer_subjects cs ON sul.subject_id = cs.id
+            {user_where}
             GROUP BY cs.subject_type
             ORDER BY usage_count DESC
-        ''')
+        ''', user_params)
         usage_stats = dict(cursor.fetchall())
 
         # 客户主题列表（带使用次数统计）
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT c.id, c.customer_name, c.country,
                    cs.id as subject_id, cs.subject_line, cs.subject_type, cs.subject_index,
                    cs.generation_strategy,
                    (SELECT COUNT(*) FROM subject_usage_log WHERE subject_id = cs.id) as usage_count
             FROM customers c
             JOIN customer_subjects cs ON c.id = cs.customer_id
+            {user_where}
             ORDER BY c.customer_name, cs.subject_index
             LIMIT 200
-        ''')
+        ''', user_params)
         rows = cursor.fetchall()
 
         customer_subjects_map = {}
@@ -1118,13 +1296,14 @@ def api_subjects():
             })
 
         # 最近使用的主题
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT sul.subject_line, c.customer_name, sul.used_at
             FROM subject_usage_log sul
             JOIN customers c ON sul.customer_id = c.id
+            {user_where}
             ORDER BY sul.used_at DESC
             LIMIT 10
-        ''')
+        ''', user_params)
         recent_usage = [{'subject': r[0], 'customer': r[1], 'used_at': r[2]} for r in cursor.fetchall()]
 
         conn.close()
@@ -1225,13 +1404,23 @@ def api_countries():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND (c.user_id = ? OR c.user_id IS NULL)"
+            user_params = [current_user_id]
+
+        cursor.execute(f'''
             SELECT c.country, COUNT(*) as cnt
             FROM customers c
-            WHERE c.country IS NOT NULL AND c.country != '' AND c.country != 'nan' AND c.country != 'NaN' AND c.country != 'None'
+            WHERE c.country IS NOT NULL AND c.country != '' AND c.country != 'nan' AND c.country != 'NaN' AND c.country != 'None'{user_where}
             GROUP BY c.country
             ORDER BY cnt DESC
-        ''')
+        ''', user_params)
         rows = cursor.fetchall()
         conn.close()
         countries = [{'name': r[0], 'count': r[1]} for r in rows]
@@ -1248,15 +1437,25 @@ def api_country_customers(country):
         cutoff = (datetime.now() - timedelta(days=cooldown_days)).strftime('%Y-%m-%d %H:%M:%S')
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = [country]
+        if not admin and current_user_id:
+            user_where = " AND (c.user_id = ? OR c.user_id IS NULL)"
+            user_params.append(current_user_id)
+
+        cursor.execute(f'''
             SELECT c.id, c.customer_name, c.country, c.website,
                    COUNT(DISTINCT CASE WHEN e.is_active = 1 THEN e.id END) as email_count
             FROM customers c
             LEFT JOIN emails e ON c.id = e.customer_id
-            WHERE c.country = ?
+            WHERE c.country = ?{user_where}
             GROUP BY c.id
             ORDER BY c.customer_name
-        ''', (country,))
+        ''', user_params)
         rows = cursor.fetchall()
 
         customers = []
@@ -1303,13 +1502,23 @@ def api_industries():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        user_where = ""
+        user_params = []
+        if not admin and current_user_id:
+            user_where = " AND (c.user_id = ? OR c.user_id IS NULL)"
+            user_params = [current_user_id]
+
+        cursor.execute(f'''
             SELECT c.industry_type, COUNT(*) as cnt
             FROM customers c
-            WHERE c.industry_type IS NOT NULL AND c.industry_type != ''
+            WHERE c.industry_type IS NOT NULL AND c.industry_type != ''{user_where}
             GROUP BY c.industry_type
             ORDER BY cnt DESC
-        ''')
+        ''', user_params)
         rows = cursor.fetchall()
         conn.close()
         industries = [{'name': r[0], 'count': r[1]} for r in rows]
@@ -1476,6 +1685,7 @@ def api_create_send_task():
             'pause_on_error': data.get('pause_on_error', False),
         }
         target_word_count = data.get('target_word_count')
+        selected_material_ids = data.get('selected_material_ids')
 
         # 检查是否有相同 email_ids 的任务正在运行
         email_ids_set = frozenset(email_ids) if email_ids else frozenset()
@@ -1543,6 +1753,7 @@ def api_create_send_task():
                 'error': None,
                 'send_config': send_config,
                 'email_ids_set': email_ids_set,
+                'selected_material_ids': selected_material_ids,
                 'created_at': time.time()
             }
 
@@ -1577,7 +1788,8 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None)
         from core.sender import EmailSender
         from generators.workflow import EmailWorkflow
         sender = EmailSender()
-        workflow = EmailWorkflow()
+        current_user_id = get_current_user_id()
+        workflow = EmailWorkflow(user_id=current_user_id)
 
         # 按客户分组
         from collections import defaultdict
@@ -1628,9 +1840,11 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None)
                     f'[{processed_customers}/{total_customers}] 生成邮件: {customer_name}'
                 )
 
+                selected_material_ids = task.get('selected_material_ids')
                 email_content = workflow.generate_email(
                     customer_name, website or '',
-                    target_word_count=target_word_count
+                    target_word_count=target_word_count,
+                    selected_material_ids=selected_material_ids
                 )
 
                 # Step 8: 智能标题生成与分配
@@ -2395,6 +2609,7 @@ def api_send_test():
         customer_id = data.get('customer_id')
         email_addresses = data.get('email_addresses', [])
         target_word_count = data.get('target_word_count')
+        selected_material_ids = data.get('selected_material_ids')
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
@@ -2422,6 +2637,7 @@ def api_send_test():
                 'email_preview': None,
                 'error': None,
                 'target_word_count': target_word_count,
+                'selected_material_ids': selected_material_ids,
                 'send_config': send_config,
                 'created_at': time.time()
             }
@@ -2522,7 +2738,8 @@ def _do_send_email(task_id, customer_id, email_addresses=None):
         from generators.workflow import EmailWorkflow
 
         sender = EmailSender()
-        workflow = EmailWorkflow()
+        current_user_id = get_current_user_id()
+        workflow = EmailWorkflow(user_id=current_user_id)
 
         # 确保客户有主题池
         sender.ensure_customer_subjects(customer_id)
@@ -2531,7 +2748,13 @@ def _do_send_email(task_id, customer_id, email_addresses=None):
         def on_progress(step_id, status):
             _update_task_step(task_id, step_id, status)
 
-        email_content = workflow.generate_email(customer_name, website or '', progress_callback=on_progress, target_word_count=task.get('target_word_count'))
+        selected_material_ids = task.get('selected_material_ids')
+        email_content = workflow.generate_email(
+            customer_name, website or '',
+            progress_callback=on_progress,
+            target_word_count=task.get('target_word_count'),
+            selected_material_ids=selected_material_ids
+        )
 
         # 保存邮件预览
         task['email_preview'] = {
@@ -2815,6 +3038,7 @@ def api_email_preview():
         data = request.json or {}
         customer_id = data.get('customer_id')
         target_word_count = data.get('target_word_count')
+        selected_material_ids = data.get('selected_material_ids')
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
@@ -2834,6 +3058,7 @@ def api_email_preview():
                 'email_preview': None,
                 'error': None,
                 'target_word_count': target_word_count,
+                'selected_material_ids': selected_material_ids,
                 'created_at': time.time()
             }
 
@@ -2875,13 +3100,20 @@ def _do_generate_preview(task_id, customer_id):
 
         # 延迟导入避免循环
         from generators.workflow import EmailWorkflow
-        workflow = EmailWorkflow()
+        current_user_id = get_current_user_id()
+        workflow = EmailWorkflow(user_id=current_user_id)
 
         # 生成邮件内容
         def on_progress(step_id, status):
             _update_task_step(task_id, step_id, status)
 
-        email_content = workflow.generate_email(customer_name, website or '', progress_callback=on_progress, target_word_count=task.get('target_word_count'))
+        selected_material_ids = task.get('selected_material_ids')
+        email_content = workflow.generate_email(
+            customer_name, website or '',
+            progress_callback=on_progress,
+            target_word_count=task.get('target_word_count'),
+            selected_material_ids=selected_material_ids
+        )
 
         # 保存邮件预览
         task['email_preview'] = {
@@ -3232,11 +3464,14 @@ def api_materials_list():
         region = request.args.get('region') or None
         search = request.args.get('search') or None
         active_only = request.args.get('active_only', 'true').lower() == 'true'
+        current_user_id = get_current_user_id()
+        admin = is_admin()
 
         result = get_materials_list(
             material_type=material_type, category=category, scope=scope,
             track=track, region=region, search=search, active_only=active_only,
-            page=page, per_page=per_page
+            page=page, per_page=per_page,
+            user_id=current_user_id, admin=admin
         )
         return jsonify({'success': True, 'data': result})
     except Exception as e:
@@ -3247,7 +3482,9 @@ def api_materials_list():
 def api_material_detail(material_id):
     """获取单个资料详情"""
     try:
-        material = get_material_by_id(material_id)
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        material = get_material_by_id(material_id, user_id=current_user_id, admin=admin)
         if not material:
             return jsonify({'success': False, 'error': '资料不存在'}), 404
         return jsonify({'success': True, 'data': material})
@@ -3263,7 +3500,8 @@ def api_material_create():
         if not data.get('material_key') or not data.get('name') or not data.get('material_type'):
             return jsonify({'success': False, 'error': '缺少必填字段'}), 400
 
-        material_id = create_material(data)
+        current_user_id = get_current_user_id()
+        material_id = create_material(data, user_id=current_user_id)
         return jsonify({'success': True, 'message': '资料创建成功', 'data': {'id': material_id}})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3274,7 +3512,9 @@ def api_material_update(material_id):
     """更新资料"""
     try:
         data = request.json or {}
-        update_material(material_id, data)
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        update_material(material_id, data, user_id=current_user_id, admin=admin)
         return jsonify({'success': True, 'message': '资料更新成功'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3284,7 +3524,9 @@ def api_material_update(material_id):
 def api_material_delete(material_id):
     """删除资料"""
     try:
-        delete_material(material_id)
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        delete_material(material_id, user_id=current_user_id, admin=admin)
         return jsonify({'success': True, 'message': '资料删除成功'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3294,7 +3536,9 @@ def api_material_delete(material_id):
 def api_material_types():
     """获取资料类型枚举"""
     try:
-        types = get_material_types()
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        types = get_material_types(user_id=current_user_id, admin=admin)
         return jsonify({'success': True, 'data': types})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3324,7 +3568,9 @@ def api_material_tracks():
 def api_material_stats():
     """获取资料库统计"""
     try:
-        stats = get_material_stats()
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        stats = get_material_stats(user_id=current_user_id, admin=admin)
         return jsonify({'success': True, 'data': stats})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3344,7 +3590,9 @@ def api_material_upload(material_id):
         if not allowed_file(file.filename):
             return jsonify({'success': False, 'error': '不支持的文件类型'}), 400
 
-        material = get_material_by_id(material_id)
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        material = get_material_by_id(material_id, user_id=current_user_id, admin=admin)
         if not material:
             return jsonify({'success': False, 'error': '资料不存在'}), 404
 
@@ -3369,7 +3617,9 @@ def api_material_upload(material_id):
 def api_material_remove_upload(material_id):
     """删除文件附件"""
     try:
-        material = get_material_by_id(material_id)
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+        material = get_material_by_id(material_id, user_id=current_user_id, admin=admin)
         if not material:
             return jsonify({'success': False, 'error': '资料不存在'}), 404
 
@@ -3404,27 +3654,39 @@ def _check_ai_rate_limit(ip_address: str) -> tuple:
 @app.route('/api/materials/analyze', methods=['POST'])
 @require_ajax
 def api_materials_analyze():
-    """AI分析单个文件，返回识别结果（不导入）"""
+    """AI分析文件，返回预览列表（不入库，供用户确认后导入）"""
     try:
         from services.ai_material_analyzer import AIMaterialAnalyzer, SUPPORTED_EXTENSIONS
 
-        if 'file' not in request.files:
+        files = request.files.getlist('files')
+        if not files or not any(f.filename for f in files):
             return jsonify({'success': False, 'error': '未上传文件'}), 400
 
-        file = request.files['file']
-        if not file.filename:
-            return jsonify({'success': False, 'error': '文件名为空'}), 400
+        # 验证文件
+        valid_files = []
+        errors = []
+        for f in files:
+            if not f.filename:
+                continue
+            ext = os.path.splitext(f.filename)[1].lower()
+            if ext not in SUPPORTED_EXTENSIONS:
+                errors.append(f'{f.filename}: 不支持的格式 {ext}')
+                continue
+            file_bytes = f.read()
+            if len(file_bytes) > 20 * 1024 * 1024:
+                errors.append(f'{f.filename}: 超过20MB限制')
+                continue
+            if len(file_bytes.strip()) == 0:
+                errors.append(f'{f.filename}: 文件为空')
+                continue
+            valid_files.append({'bytes': file_bytes, 'filename': f.filename})
 
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext not in SUPPORTED_EXTENSIONS:
+        if not valid_files:
             return jsonify({
                 'success': False,
-                'error': f'不支持的文件格式: {ext}，支持: {", ".join(sorted(SUPPORTED_EXTENSIONS))}'
+                'error': '没有有效的文件',
+                'errors': errors
             }), 400
-
-        file_bytes = file.read()
-        if len(file_bytes) > 20 * 1024 * 1024:  # 20MB
-            return jsonify({'success': False, 'error': '文件大小超过20MB限制'}), 400
 
         # 速率限制检查
         ip = request.remote_addr or 'unknown'
@@ -3436,8 +3698,36 @@ def api_materials_analyze():
         if not analyzer.is_available():
             return jsonify({'success': False, 'error': 'AI 服务未配置，请检查 API Key'}), 503
 
-        result = analyzer.analyze_file(file_bytes, file.filename)
-        return jsonify(result)
+        # 分析所有文件，返回预览列表
+        previews = []
+        for f in valid_files:
+            result = analyzer.analyze_file(f['bytes'], f['filename'])
+            if result.get('success'):
+                analysis = result['analysis']
+                previews.append({
+                    'filename': f['filename'],
+                    'suggested_type': analysis.get('material_type', 'other'),
+                    'material_type': analysis.get('material_type_mapped', 'advantage'),
+                    'name': analysis.get('name', os.path.splitext(f['filename'])[0]),
+                    'summary': analysis.get('summary', ''),
+                    'scope': analysis.get('scope', 'all'),
+                    'track': analysis.get('track', ''),
+                    'region': analysis.get('region', ''),
+                    'structured_content': analysis.get('structured_content', {}),
+                    'confidence': analysis.get('confidence', 0),
+                    'tags': analysis.get('tags', []),
+                    'priority': analysis.get('priority', 3),
+                    'raw_analysis': analysis
+                })
+            else:
+                errors.append(f"{f['filename']}: {result.get('error', '分析失败')}")
+
+        return jsonify({
+            'success': True,
+            'previews': previews,
+            'total': len(previews),
+            'errors': errors if errors else None
+        })
 
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3446,7 +3736,7 @@ def api_materials_analyze():
 @app.route('/api/materials/import', methods=['POST'])
 @require_ajax
 def api_materials_import():
-    """将AI分析结果导入素材库"""
+    """将AI分析结果导入素材库（保留旧版接口，传入user_id）"""
     try:
         from services.ai_material_analyzer import AIMaterialAnalyzer, SUPPORTED_EXTENSIONS
 
@@ -3483,16 +3773,95 @@ def api_materials_import():
                 'analysis': analysis_result
             })
 
+        current_user_id = get_current_user_id()
         import_result = analyzer.import_analyzed_material(
             analysis_result,
             source_file=file.filename,
-            overwrite=overwrite
+            overwrite=overwrite,
+            user_id=current_user_id or None
         )
 
         return jsonify({
             'success': import_result['success'],
             'analysis': analysis_result,
             'import': import_result
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/materials/analyze/confirm', methods=['POST'])
+@require_ajax
+def api_materials_analyze_confirm():
+    """用户确认AI分析预览后，批量正式导入素材库"""
+    try:
+        from services.ai_material_analyzer import AIMaterialAnalyzer
+
+        data = request.get_json(silent=True) or {}
+        previews = data.get('previews', [])
+
+        if not previews:
+            return jsonify({'success': False, 'error': '未提供预览数据'}), 400
+
+        current_user_id = get_current_user_id()
+        analyzer = AIMaterialAnalyzer()
+        results = []
+        imported = 0
+        skipped = 0
+        failed = 0
+
+        for preview in previews:
+            try:
+                # 构造 analysis_result 格式复用现有导入逻辑
+                analysis_result = {
+                    'success': True,
+                    'filename': preview.get('filename', ''),
+                    'analysis': preview.get('raw_analysis', preview)
+                }
+                # 用用户修改后的字段覆盖
+                if preview.get('name'):
+                    analysis_result['analysis']['name'] = preview['name']
+                if preview.get('material_type'):
+                    analysis_result['analysis']['material_type'] = preview['material_type']
+                if preview.get('summary'):
+                    analysis_result['analysis']['summary'] = preview['summary']
+                if preview.get('scope'):
+                    analysis_result['analysis']['scope'] = preview['scope']
+                if preview.get('track'):
+                    analysis_result['analysis']['track'] = preview['track']
+                if preview.get('region'):
+                    analysis_result['analysis']['region'] = preview['region']
+                if preview.get('priority') is not None:
+                    analysis_result['analysis']['priority'] = preview['priority']
+
+                res = analyzer.import_analyzed_material(
+                    analysis_result,
+                    source_file=preview.get('filename'),
+                    user_id=current_user_id or None
+                )
+                results.append(res)
+                if res['action'] == 'created':
+                    imported += 1
+                elif res['action'] == 'skipped':
+                    skipped += 1
+                else:
+                    failed += 1
+            except Exception as e:
+                failed += 1
+                results.append({
+                    'success': False,
+                    'material_id': None,
+                    'action': 'error',
+                    'message': str(e)
+                })
+
+        return jsonify({
+            'success': True,
+            'results': results,
+            'imported': imported,
+            'skipped': skipped,
+            'failed': failed
         })
 
     except Exception as e:
@@ -3514,6 +3883,7 @@ def api_materials_batch_import():
             return jsonify({'success': False, 'error': '未上传文件'}), 400
 
         overwrite = request.form.get('overwrite', 'false').lower() == 'true'
+        current_user_id = get_current_user_id()
 
         # 验证文件
         valid_files = []
@@ -3566,7 +3936,8 @@ def api_materials_batch_import():
                         continue
 
                     import_res = analyzer.import_analyzed_material(
-                        result, source_file=f['filename'], overwrite=overwrite
+                        result, source_file=f['filename'], overwrite=overwrite,
+                        user_id=current_user_id or None
                     )
                     if import_res['action'] == 'created':
                         imported += 1
@@ -3619,6 +3990,93 @@ def api_materials_batch_status(task_id):
         return jsonify({
             'success': True,
             'task': task
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/materials/selector')
+@require_ajax
+def api_materials_selector():
+    """获取精简版资料列表，供发送页选择器使用"""
+    try:
+        from database.material_models import get_materials_list
+
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        result = get_materials_list(
+            active_only=True, page=1, per_page=500,
+            user_id=current_user_id, admin=admin
+        )
+
+        simplified = []
+        for m in result['materials']:
+            simplified.append({
+                'id': m['id'],
+                'name': m['name'],
+                'material_key': m['material_key'],
+                'material_type': m['material_type'],
+                'summary': m['content_summary']
+            })
+
+        return jsonify({
+            'success': True,
+            'data': simplified,
+            'total': len(simplified)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/materials/<int:material_id>/content')
+@require_ajax
+def api_material_content(material_id):
+    """获取单个素材的完整 content_json"""
+    try:
+        from database.material_models import get_material_by_id
+
+        current_user_id = get_current_user_id()
+        admin = is_admin()
+
+        material = get_material_by_id(material_id, user_id=current_user_id, admin=admin)
+        if not material:
+            return jsonify({'success': False, 'error': '素材不存在或无权限'}), 404
+
+        return jsonify({
+            'success': True,
+            'data': material
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/materials/sender-info', methods=['GET', 'POST'])
+@require_ajax
+def api_materials_sender_info():
+    """获取或保存当前用户的发信人信息"""
+    try:
+        from materials.sender_info_service import get_sender_info, save_sender_info
+
+        current_user_id = get_current_user_id()
+
+        if request.method == 'GET':
+            info = get_sender_info(user_id=current_user_id)
+            return jsonify({
+                'success': True,
+                'data': info
+            })
+
+        # POST: 保存发信人信息
+        data = request.get_json(silent=True) or {}
+        if not data.get('sender_name'):
+            return jsonify({'success': False, 'error': '发信人姓名不能为空'}), 400
+
+        material_id = save_sender_info(data, user_id=current_user_id)
+        return jsonify({
+            'success': True,
+            'material_id': material_id,
+            'message': '发信人信息已保存'
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3887,7 +4345,7 @@ def api_ai_analyze_file():
 
 # ==================== 异步批量导入任务 ====================
 
-def _do_batch_import(task_id, temp_path, filename):
+def _do_batch_import(task_id, temp_path, filename, user_id=None):
     """后台执行批量导入任务"""
     from services.ai_batch_analyzer import AIBatchAnalyzer
     from database.connection import get_connection
@@ -3989,35 +4447,42 @@ def _do_batch_import(task_id, temp_path, filename):
                 continue
 
             try:
-                # 检查客户是否已存在
-                cursor.execute(
-                    'SELECT id FROM customers WHERE customer_name = ?',
-                    (customer['customer_name'],)
-                )
+                # 检查客户是否已存在（按用户隔离）
+                if user_id:
+                    cursor.execute(
+                        'SELECT id FROM customers WHERE customer_name = ? AND (user_id = ? OR user_id IS NULL)',
+                        (customer['customer_name'], user_id)
+                    )
+                else:
+                    cursor.execute(
+                        'SELECT id FROM customers WHERE customer_name = ?',
+                        (customer['customer_name'],)
+                    )
                 existing = cursor.fetchone()
 
                 if existing:
                     customer_id = existing[0]
                     skipped_customers += 1
                 else:
-                    # 插入新客户
+                    # 插入新客户（带user_id）
                     cursor.execute('''
                         INSERT INTO customers
-                        (customer_name, country, website, address, company_info, industry_type)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        (customer_name, country, website, address, company_info, industry_type, user_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
                     ''', (
                         customer['customer_name'],
                         customer.get('country', ''),
                         customer.get('website', ''),
                         customer.get('address', ''),
                         customer.get('company_info', ''),
-                        item.get('classification', {}).get('industry', '') if item.get('classification') else ''
+                        item.get('classification', {}).get('industry', '') if item.get('classification') else '',
+                        user_id
                     ))
                     customer_id = cursor.lastrowid
                     imported += 1
                     imported_customer_ids.append(customer_id)
 
-                # 插入联系人邮箱
+                # 插入联系人邮箱（带user_id）
                 for contact in contacts:
                     email = contact['email_address']
                     if not email:
@@ -4034,14 +4499,15 @@ def _do_batch_import(task_id, temp_path, filename):
                         if not existing_email:
                             cursor.execute('''
                                 INSERT INTO emails
-                                (customer_id, email_address, email_type, contact_name, job_title, is_active)
-                                VALUES (?, ?, ?, ?, ?, 1)
+                                (customer_id, email_address, email_type, contact_name, job_title, is_active, user_id, created_at)
+                                VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))
                             ''', (
                                 customer_id,
                                 email,
                                 contact['email_type'],
                                 contact.get('contact_name', ''),
-                                contact.get('job_title', '')
+                                contact.get('job_title', ''),
+                                user_id
                             ))
                             imported_contacts += 1
                         else:
@@ -4106,10 +4572,14 @@ def _do_batch_import(task_id, temp_path, filename):
             }
 
     except Exception as e:
+        print(f"[导入任务 {task_id}] 后台导入异常: {e}")
+        import traceback
+        traceback.print_exc()
         with import_tasks_lock:
-            import_tasks[task_id]['status'] = 'failed'
-            import_tasks[task_id]['error'] = str(e)
-            import_tasks[task_id]['current_step'] = f'导入失败: {str(e)}'
+            if task_id in import_tasks:
+                import_tasks[task_id]['status'] = 'failed'
+                import_tasks[task_id]['error'] = str(e)
+                import_tasks[task_id]['current_step'] = f'导入失败: {str(e)}'
     finally:
         # 安全清理临时文件
         try:
@@ -4165,9 +4635,10 @@ def api_ai_batch_analyze_import():
             }
 
         # 启动后台线程执行导入
+        current_user_id = get_current_user_id()
         thread = threading.Thread(
             target=_do_batch_import,
-            args=(task_id, temp_path, file.filename),
+            args=(task_id, temp_path, file.filename, current_user_id),
             daemon=True
         )
         thread.start()
@@ -4241,11 +4712,14 @@ def api_search_tasks_create():
     platforms = data.get('platforms', [])
     config = data.get('config', {})
     task_name = data.get('task_name', '')
+    queries = data.get('queries', [])  # 支持传入多个关键词
 
-    if not query:
+    if not query and not queries:
         return jsonify({'success': False, 'error': '搜索关键词不能为空'}), 400
     if not platforms or not isinstance(platforms, list):
         return jsonify({'success': False, 'error': '请至少选择一个搜索平台'}), 400
+
+    current_user_id = get_current_user_id()
 
     engine = get_search_engine()
     task_id = engine.create_and_run(
@@ -4253,7 +4727,9 @@ def api_search_tasks_create():
         location=location,
         platforms=platforms,
         config=config,
-        task_name=task_name or f"{query} - {location or '全球'}"
+        task_name=task_name or f"{query} - {location or '全球'}",
+        queries=queries if queries else None,
+        user_id=current_user_id
     )
 
     return jsonify({
@@ -4273,11 +4749,15 @@ def api_search_tasks_list():
     status = request.args.get('status', '')
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    current_user_id = get_current_user_id()
+    admin = is_admin()
 
     result = get_search_tasks(
         status=status if status else None,
         page=page,
-        per_page=per_page
+        per_page=per_page,
+        user_id=current_user_id,
+        admin=admin
     )
 
     return jsonify({'success': True, 'data': result})
@@ -4287,6 +4767,14 @@ def api_search_tasks_list():
 @require_ajax
 def api_search_task_detail(task_id):
     """获取任务详情"""
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+
+    # 验证任务是否属于当前用户
+    db_task = get_search_task(task_id, user_id=current_user_id, admin=admin)
+    if not db_task:
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
+
     engine = get_search_engine()
     task = engine.get_task_status(task_id)
     if not task:
@@ -4300,6 +4788,13 @@ def api_search_task_action(task_id):
     """任务操作（cancel）"""
     data = request.get_json() or {}
     action = data.get('action', '')
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+
+    # 验证任务是否属于当前用户
+    db_task = get_search_task(task_id, user_id=current_user_id, admin=admin)
+    if not db_task:
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
 
     engine = get_search_engine()
     if action == 'cancel':
@@ -4314,7 +4809,9 @@ def api_search_task_action(task_id):
 @require_ajax
 def api_search_task_delete(task_id):
     """删除任务"""
-    if delete_search_task(task_id):
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    if delete_search_task(task_id, user_id=current_user_id, admin=admin):
         return jsonify({'success': True, 'message': '任务已删除'})
     return jsonify({'success': False, 'error': '任务不存在'}), 404
 
@@ -4328,6 +4825,8 @@ def api_search_task_results(task_id):
     search = request.args.get('search', '')
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    current_user_id = get_current_user_id()
+    admin = is_admin()
 
     result = get_search_results(
         task_id=task_id,
@@ -4335,7 +4834,9 @@ def api_search_task_results(task_id):
         status=status if status else None,
         search_keyword=search if search else None,
         page=page,
-        per_page=per_page
+        per_page=per_page,
+        user_id=current_user_id,
+        admin=admin
     )
 
     return jsonify({'success': True, 'data': result})
@@ -4346,7 +4847,9 @@ def api_search_task_results(task_id):
 def api_search_result_detail(result_id):
     """获取单条结果详情"""
     print(f"[API] Fetching result detail: result_id={result_id}, type={type(result_id)}")
-    result = get_search_result(result_id)
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    result = get_search_result(result_id, user_id=current_user_id, admin=admin)
     print(f"[API] Query result: {'FOUND' if result else 'NOT FOUND'}, id={result.get('id') if result else None}")
     if not result:
         return jsonify({'success': False, 'error': '结果不存在'}), 404
@@ -4357,7 +4860,9 @@ def api_search_result_detail(result_id):
 @require_ajax
 def api_deep_email_search(result_id):
     """手动触发邮箱深挖（Hunter API + 全网搜索）"""
-    result = get_search_result(result_id)
+    current_user_id = get_current_user_id()
+    admin = is_admin()
+    result = get_search_result(result_id, user_id=current_user_id, admin=admin)
     if not result:
         return jsonify({'success': False, 'error': '结果不存在'}), 404
 
@@ -4440,11 +4945,13 @@ def api_search_results_bulk_review():
     data = request.get_json() or {}
     result_ids = data.get('result_ids', [])
     status = data.get('status', '')
+    current_user_id = get_current_user_id()
+    admin = is_admin()
 
     if not result_ids or status not in ('approved', 'rejected'):
         return jsonify({'success': False, 'error': '参数错误'}), 400
 
-    updated = bulk_update_result_status(result_ids, status)
+    updated = bulk_update_result_status(result_ids, status, user_id=current_user_id, admin=admin)
     return jsonify({'success': True, 'data': {'updated_count': updated}})
 
 
@@ -4455,6 +4962,7 @@ def api_search_results_import():
     data = request.get_json() or {}
     result_ids = data.get('result_ids', [])
     options = data.get('import_options', {})
+    current_user_id = get_current_user_id()
 
     if not result_ids:
         return jsonify({'success': False, 'error': '请选择要导入的结果'}), 400
@@ -4466,7 +4974,7 @@ def api_search_results_import():
 
     for rid in result_ids:
         try:
-            result = import_result_to_customer(rid, options)
+            result = import_result_to_customer(rid, options, user_id=current_user_id)
             if result['success']:
                 imported += 1
                 details.append({'result_id': rid, 'customer_id': result['customer_id'], 'status': 'imported'})
@@ -4489,6 +4997,65 @@ def api_search_results_import():
             'details': details
         }
     })
+
+
+@app.route('/api/search/expand-keywords', methods=['POST'])
+@require_ajax
+def api_expand_keywords():
+    """AI 关键词拓展 — 可视化分析"""
+    data = request.get_json()
+    if not data or 'query' not in data:
+        return jsonify({'success': False, 'error': '缺少 query 参数'}), 400
+
+    query = data['query'].strip()
+    location = data.get('location', '').strip()
+    max_keywords = data.get('max_keywords', 12)
+
+    if not query:
+        return jsonify({'success': False, 'error': '关键词不能为空'}), 400
+
+    try:
+        from services.search.keyword_expander import KeywordExpander
+        expander = KeywordExpander()
+        keywords = expander.expand(query, location, max_keywords=max_keywords)
+
+        # 分类：原始词 vs 拓展词
+        base_lower = query.strip().lower()
+        categories = {
+            'original': [],
+            'product': [],
+            'business_model': [],
+            'location': [],
+            'other': []
+        }
+
+        business_terms = ['manufacturer', 'supplier', 'distributor', 'wholesaler', 'dealer', 'factory', 'vendor', 'exporter', 'importer', 'trader', 'reseller', 'oem', 'odm', 'producer']
+        location_terms = ['usa', 'us', 'america', 'europe', 'china', 'india', 'germany', 'uk', 'japan', 'australia', 'canada', 'france', 'italy', 'spain', 'mexico', 'brazil']
+
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower == base_lower:
+                categories['original'].append(kw)
+            elif any(term in kw_lower for term in business_terms):
+                categories['business_model'].append(kw)
+            elif any(term in kw_lower for term in location_terms):
+                categories['location'].append(kw)
+            elif kw_lower != base_lower and query.lower() in kw_lower:
+                categories['product'].append(kw)
+            else:
+                categories['other'].append(kw)
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'base_keyword': query,
+                'keywords': keywords,
+                'categories': categories,
+                'total': len(keywords)
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'关键词拓展失败: {str(e)}'}), 500
 
 
 @app.route('/api/search/platforms', methods=['GET'])
@@ -4598,9 +5165,11 @@ def api_search_batch_ai_analyze():
         return jsonify({'success': False, 'error': 'AI服务不可用'}), 503
 
     # 读取结果数据
+    current_user_id = get_current_user_id()
+    admin = is_admin()
     results = []
     for rid in result_ids:
-        r = get_search_result(rid)
+        r = get_search_result(rid, user_id=current_user_id, admin=admin)
         if r:
             from services.search.base import SearchResult
             sr = SearchResult(
@@ -4627,6 +5196,31 @@ def api_search_batch_ai_analyze():
         'success': True,
         'data': {'analyzed_count': analyzed, 'failed_count': failed}
     })
+
+
+# ==================== 邮件规范 API ====================
+
+@app.route('/api/email-guidelines', methods=['GET'])
+@login_required
+def get_email_guidelines_api():
+    """获取邮件规范"""
+    from database.email_guidelines_models import get_email_guidelines
+    guidelines = get_email_guidelines()
+    if guidelines:
+        return jsonify({'success': True, 'data': guidelines})
+    return jsonify({'success': False, 'error': '未找到邮件规范'}), 404
+
+
+@app.route('/api/email-guidelines', methods=['PUT'])
+@login_required
+def update_email_guidelines_api():
+    """更新邮件规范"""
+    data = request.get_json()
+    if not data or 'content' not in data:
+        return jsonify({'success': False, 'error': '缺少 content 字段'}), 400
+    from database.email_guidelines_models import update_email_guidelines
+    update_email_guidelines(data['content'], data.get('is_active', True))
+    return jsonify({'success': True, 'message': '邮件规范已更新'})
 
 
 # ==================== Main ====================

@@ -1,6 +1,98 @@
 from database.connection import get_connection
 
 
+def get_or_create_user(email, name=None, avatar=None, oauth_provider='google', oauth_id=None):
+    """获取或创建用户。第一个注册的用户自动设为管理员。"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # 检查用户是否已存在
+    cursor.execute('SELECT id, email, name, avatar, role, is_active FROM users WHERE email = ?', (email,))
+    user = cursor.fetchone()
+
+    if user:
+        # 更新最后登录时间
+        cursor.execute('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?', (user[0],))
+        conn.commit()
+        conn.close()
+        return {
+            'id': user[0],
+            'email': user[1],
+            'name': user[2],
+            'avatar': user[3],
+            'role': user[4],
+            'is_active': user[5]
+        }
+
+    # 检查是否已有用户（第一个用户设为管理员）
+    cursor.execute('SELECT COUNT(*) FROM users')
+    user_count = cursor.fetchone()[0]
+    role = 'admin' if user_count == 0 else 'user'
+
+    # 创建新用户
+    cursor.execute('''
+        INSERT INTO users (email, name, avatar, oauth_provider, oauth_id, role, last_login_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (email, name, avatar, oauth_provider, oauth_id, role))
+
+    user_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    return {
+        'id': user_id,
+        'email': email,
+        'name': name,
+        'avatar': avatar,
+        'role': role,
+        'is_active': 1
+    }
+
+
+def get_user_by_id(user_id):
+    """通过ID获取用户信息"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, email, name, avatar, role, is_active FROM users WHERE id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            'id': row[0],
+            'email': row[1],
+            'name': row[2],
+            'avatar': row[3],
+            'role': row[4],
+            'is_active': row[5]
+        }
+    return None
+
+
+def get_all_users():
+    """获取所有用户列表（管理员用）"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, email, name, avatar, role, is_active, created_at, last_login_at
+        FROM users ORDER BY created_at DESC
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            'id': r[0],
+            'email': r[1],
+            'name': r[2],
+            'avatar': r[3],
+            'role': r[4],
+            'is_active': r[5],
+            'created_at': r[6],
+            'last_login_at': r[7]
+        }
+        for r in rows
+    ]
+
+
 def init_database():
     conn = get_connection()
     cursor = conn.cursor()
@@ -211,6 +303,20 @@ def init_database():
         pass
     try:
         cursor.execute('ALTER TABLE materials ADD COLUMN ai_confidence REAL')
+    except:
+        pass
+
+    # 迁移：为素材表添加公共/私有、使用次数、适用范围字段
+    try:
+        cursor.execute('ALTER TABLE materials ADD COLUMN is_public INTEGER DEFAULT 0')
+    except:
+        pass
+    try:
+        cursor.execute('ALTER TABLE materials ADD COLUMN usage_count INTEGER DEFAULT 0')
+    except:
+        pass
+    try:
+        cursor.execute('ALTER TABLE materials ADD COLUMN material_scope TEXT')
     except:
         pass
 
@@ -445,6 +551,28 @@ def init_database():
     _add_column_safe(cursor, 'search_tasks', 'pre_filtered_count', 'INTEGER DEFAULT 0')
     _add_column_safe(cursor, 'search_tasks', 'crawl_rejected_count', 'INTEGER DEFAULT 0')
     _add_column_safe(cursor, 'search_tasks', 'ai_skipped_count', 'INTEGER DEFAULT 0')
+    _add_column_safe(cursor, 'search_tasks', 'expanded_keywords', 'TEXT')
+
+    # ==================== 数据隔离：为所有业务表添加 user_id 字段 ====================
+    _add_column_safe(cursor, 'customers', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'contacts', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'emails', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'email_logs', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'email_templates', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'customer_subjects', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'subject_usage_log', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'send_schedule', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'cooldown_override', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'materials', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'import_tasks', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'material_usage_log', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'send_task_items', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'send_tasks_meta', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'search_tasks', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'search_results', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'blacklisted_companies', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'api_configs', 'user_id', 'INTEGER')
+    _add_column_safe(cursor, 'bounce_logs', 'user_id', 'INTEGER')
 
     # search_results 新增验证字段
     _add_column_safe(cursor, 'search_results', 'validation_status', "TEXT DEFAULT 'pending'")
@@ -503,6 +631,52 @@ def init_database():
         cursor.execute('ALTER TABLE email_logs ADD COLUMN bounce_status TEXT DEFAULT NULL')
     except Exception:
         pass
+
+    # ==================== 用户认证表 ====================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            name TEXT,
+            avatar TEXT,
+            oauth_provider TEXT DEFAULT 'google',
+            oauth_id TEXT,
+            role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user')),
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login_at TIMESTAMP
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_oauth ON users(oauth_provider, oauth_id)')
+
+    # ==================== 管理员面板查询优化索引 ====================
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_customers_country ON customers(country)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_customers_industry ON customers(industry_type)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_customers_created ON customers(created_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_logs_customer ON email_logs(customer_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_logs_customer_status ON email_logs(customer_id, send_status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_logs_sent_at_status ON email_logs(sent_at, send_status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_contacts_source ON contacts(source)')
+
+    # 邮件规范表
+    from database.email_guidelines_models import init_email_guidelines_table
+    init_email_guidelines_table()
+
+    # 邀请码表
+    from database.invite_code_models import init_invite_codes_table
+    init_invite_codes_table()
+    
+    # 邀请码使用日志表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS invite_code_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_invite_logs_code ON invite_code_logs(code)')
 
     conn.commit()
     conn.close()

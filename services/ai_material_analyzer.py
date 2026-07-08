@@ -219,7 +219,8 @@ Analyze this document and classify it for the Niteo Solar material library."""
 
     def import_analyzed_material(self, analysis_result: Dict,
                                    source_file: str = None,
-                                   overwrite: bool = False) -> Dict:
+                                   overwrite: bool = False,
+                                   user_id: int = None) -> Dict:
         """
         将AI分析结果导入素材库
 
@@ -227,6 +228,7 @@ Analyze this document and classify it for the Niteo Solar material library."""
             analysis_result: analyze_file() 的返回值（必须包含 analysis 字段）
             source_file: 来源文件路径
             overwrite: 是否覆盖同 key 素材
+            user_id: 用户ID（None表示系统公共素材）
 
         Returns:
             {
@@ -253,18 +255,21 @@ Analyze this document and classify it for the Niteo Solar material library."""
         name = analysis.get('name', os.path.splitext(filename)[0])
         base_key = _generate_material_key(name, filename)
 
-        # 2. 检查是否已存在
-        existing = get_materials_by_type('all')
+        # 2. 检查是否已存在（按用户隔离）
+        existing = get_materials_by_type('all', user_id=user_id, admin=True)
         for mat in existing:
             if mat.get('material_key') == base_key:
-                if not overwrite:
-                    return {
-                        'success': True,
-                        'material_id': mat.get('id'),
-                        'material_key': base_key,
-                        'action': 'skipped',
-                        'message': f'素材已存在（ID: {mat.get("id")}），跳过导入'
-                    }
+                # 检查是否属于同一用户
+                mat_user_id = mat.get('user_id')
+                if mat_user_id == user_id:
+                    if not overwrite:
+                        return {
+                            'success': True,
+                            'material_id': mat.get('id'),
+                            'material_key': base_key,
+                            'action': 'skipped',
+                            'message': f'素材已存在（ID: {mat.get("id")}），跳过导入'
+                        }
                 # overwrite=True 时直接创建新版本（不删除旧的）
                 break
 
@@ -311,7 +316,7 @@ Analyze this document and classify it for the Niteo Solar material library."""
         }
 
         try:
-            material_id = create_material(data)
+            material_id = create_material(data, user_id=user_id)
 
             # 更新 source_file 和 ai_confidence 字段
             if source_file or analysis.get('confidence'):

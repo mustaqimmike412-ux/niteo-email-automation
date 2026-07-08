@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeLink - Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f6f5f2;
+            --surface: #ffffff;
+            --border: #e6e4df;
+            --border-light: #f0eee9;
+            --text: #1a1917;
+            --text-2: #6b6963;
+            --text-3: #a09e97;
+            --accent: #c17f24;
+            --accent-light: #f5ecd6;
+            --accent-hover: #d4901a;
+            --danger: #c94a3a;
+            --google-blue: #4285F4;
+            --radius: 16px;
+            --radius-sm: 10px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            min-height: 100vh;
+            display: flex;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* === Left Brand Panel === */
+        .brand-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+            padding: 60px;
+        }
+
+        /* Animated mesh gradient background */
+        .brand-panel .mesh {
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 80% 60% at 20% 30%, rgba(193,127,36,0.08) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 80% at 80% 70%, rgba(193,127,36,0.05) 0%, transparent 60%),
+                radial-gradient(ellipse 50% 50% at 50% 50%, rgba(26,25,23,0.02) 0%, transparent 70%);
+            animation: meshShift 25s ease-in-out infinite alternate;
+        }
+
+        @keyframes meshShift {
+            0% { transform: scale(1) translate(0, 0); }
+            50% { transform: scale(1.1) translate(-2%, 3%); }
+            100% { transform: scale(1) translate(2%, -2%); }
+        }
+
+        /* Dot grid pattern */
+        .brand-panel .dot-grid {
+            position: absolute;
+            inset: 0;
+            background-image: radial-gradient(circle, var(--border) 0.8px, transparent 0.8px);
+            background-size: 32px 32px;
+            opacity: 0.5;
+            animation: gridDrift 40s linear infinite;
+        }
+
+        @keyframes gridDrift {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(32px, 32px); }
+        }
+
+        /* Floating geometric shapes */
+        .geo-float {
+            position: absolute;
+            border: 1.5px solid var(--border);
+            opacity: 0.6;
+        }
+        .geo-1 {
+            width: 120px; height: 120px;
+            border-radius: 24px;
+            top: 12%; left: 8%;
+            transform: rotate(15deg);
+            animation: geoFloat1 18s ease-in-out infinite;
+        }
+        .geo-2 {
+            width: 80px; height: 80px;
+            border-radius: 50%;
+            top: 65%; right: 12%;
+            animation: geoFloat2 22s ease-in-out infinite;
+        }
+        .geo-3 {
+            width: 60px; height: 60px;
+            border-radius: 16px;
+            bottom: 15%; left: 20%;
+            transform: rotate(-20deg);
+            animation: geoFloat3 15s ease-in-out infinite;
+        }
+        .geo-4 {
+            width: 40px; height: 40px;
+            border-radius: 12px;
+            top: 25%; right: 25%;
+            transform: rotate(35deg);
+            animation: geoFloat1 20s ease-in-out infinite reverse;
+            border-color: var(--accent);
+            opacity: 0.3;
+        }
+        .geo-5 {
+            width: 100px; height: 100px;
+            border-radius: 50%;
+            bottom: 30%; right: 30%;
+            animation: geoFloat2 25s ease-in-out infinite reverse;
+            opacity: 0.3;
+        }
+
+        @keyframes geoFloat1 {
+            0%, 100% { transform: rotate(15deg) translate(0, 0); }
+            33% { transform: rotate(20deg) translate(10px, -15px); }
+            66% { transform: rotate(10deg) translate(-8px, 12px); }
+        }
+        @keyframes geoFloat2 {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(-12px, 8px) scale(1.05); }
+        }
+        @keyframes geoFloat3 {
+            0%, 100% { transform: rotate(-20deg) translate(0, 0); }
+            50% { transform: rotate(-15deg) translate(15px, -10px); }
+        }
+
+        /* Connection lines (trade/network metaphor) */
+        .connection-lines {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            opacity: 0.12;
+        }
+        .connection-lines svg {
+            width: 100%;
+            height: 100%;
+        }
+        .conn-line {
+            stroke: var(--accent);
+            stroke-width: 1;
+            fill: none;
+            stroke-dasharray: 6 4;
+            animation: dashMove 20s linear infinite;
+        }
+        .conn-line:nth-child(2) { animation-duration: 28s; animation-direction: reverse; }
+        .conn-line:nth-child(3) { animation-duration: 35s; }
+
+        @keyframes dashMove {
+            0% { stroke-dashoffset: 0; }
+            100% { stroke-dashoffset: -200; }
+        }
+
+        /* Brand content */
+        .brand-content {
+            position: relative;
+            z-index: 5;
+            text-align: center;
+            animation: brandEnter 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+        }
+
+        @keyframes brandEnter {
+            from { opacity: 0; transform: translateY(24px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .brand-logo {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 28px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .brand-logo-hex {
+            position: absolute;
+            inset: 0;
+        }
+        .brand-logo-hex svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .brand-logo-letter {
+            position: relative;
+            z-index: 2;
+            font-family: 'Outfit', sans-serif;
+            font-size: 32px;
+            font-weight: 800;
+            color: var(--accent);
+            letter-spacing: -1px;
+        }
+
+        .brand-content h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -1.5px;
+            margin-bottom: 12px;
+            line-height: 1.1;
+        }
+
+        .brand-content .tagline {
+            font-size: 15px;
+            color: var(--text-2);
+            letter-spacing: 0.2px;
+            line-height: 1.6;
+            max-width: 320px;
+        }
+
+        .brand-features {
+            display: flex;
+            gap: 32px;
+            margin-top: 48px;
+            animation: featEnter 1s 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+        }
+
+        @keyframes featEnter {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .brand-feat {
+            text-align: center;
+        }
+        .brand-feat-icon {
+            font-size: 22px;
+            margin-bottom: 8px;
+            display: block;
+        }
+        .brand-feat-label {
+            font-size: 11px;
+            color: var(--text-3);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        /* === Right Login Panel === */
+        .login-panel {
+            width: 480px;
+            min-width: 420px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 60px;
+            background: var(--surface);
+            border-left: 1px solid var(--border);
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Subtle top accent line */
+        .login-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 20%;
+            right: 20%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            border-radius: 0 0 2px 2px;
+        }
+
+        .login-inner {
+            animation: loginEnter 1s 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+            transform: translateX(20px);
+        }
+
+        @keyframes loginEnter {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .login-inner h2 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -0.8px;
+            margin-bottom: 6px;
+        }
+
+        .login-inner .subtitle {
+            font-size: 14px;
+            color: var(--text-3);
+            margin-bottom: 36px;
+            line-height: 1.5;
+        }
+
+        /* Error message */
+        .error-msg {
+            background: #fef2f0;
+            border: 1px solid #f0d5cf;
+            color: var(--danger);
+            padding: 12px 16px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            margin-bottom: 24px;
+            display: none;
+            animation: shakeIn 0.4s ease;
+        }
+        .error-msg.show { display: block; }
+
+        @keyframes shakeIn {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-6px); }
+            40% { transform: translateX(6px); }
+            60% { transform: translateX(-3px); }
+            80% { transform: translateX(3px); }
+        }
+
+        /* Google Button */
+        .google-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            width: 100%;
+            padding: 16px 24px;
+            background: var(--surface);
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text);
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .google-btn::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(66,133,244,0.04), rgba(52,168,83,0.04));
+            opacity: 0;
+            transition: opacity 0.35s;
+        }
+
+        .google-btn:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08), 0 2px 8px rgba(193,127,36,0.1);
+        }
+        .google-btn:hover::after { opacity: 1; }
+
+        .google-btn:active {
+            transform: translateY(0);
+            transition-duration: 0.1s;
+        }
+
+        .google-btn svg {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 1;
+        }
+        .google-btn span {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Divider */
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin: 28px 0;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+        .divider span {
+            font-size: 11px;
+            color: var(--text-3);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        /* Hints */
+        .hints {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .hint-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: var(--text-2);
+        }
+        .hint-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            background: var(--border-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+        .hint-highlight {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        /* === Invite Code Section === */
+        .invite-section {
+            overflow: hidden;
+        }
+
+        .invite-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 12px 16px;
+            background: transparent;
+            border: 1.5px dashed var(--border);
+            border-radius: var(--radius);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-3);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .invite-toggle:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--accent-light);
+        }
+        .invite-toggle .arrow {
+            transition: transform 0.3s ease;
+            font-size: 10px;
+        }
+        .invite-toggle.open .arrow {
+            transform: rotate(180deg);
+        }
+
+        .invite-form {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+            opacity: 0;
+        }
+        .invite-form.open {
+            max-height: 400px;
+            opacity: 1;
+        }
+
+        .invite-form-inner {
+            padding-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .invite-field {
+            position: relative;
+        }
+
+        .invite-field input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 14px;
+            color: var(--text);
+            background: var(--surface);
+            transition: all 0.25s ease;
+            outline: none;
+        }
+
+        .invite-field input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(193,127,36,0.1);
+        }
+
+        .invite-field input::placeholder {
+            color: var(--text-3);
+        }
+
+        .invite-field.code-input input {
+            font-family: 'Courier New', 'Consolas', monospace;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            padding-right: 48px;
+        }
+
+        .invite-field.code-input .status-icon {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-size: 12px;
+            font-weight: 700;
+            opacity: 0;
+            transition: all 0.25s ease;
+        }
+
+        .invite-field.code-input .status-icon.show { opacity: 1; }
+        .invite-field.code-input .status-icon.valid {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .invite-field.code-input .status-icon.invalid {
+            background: #fef2f0;
+            color: var(--danger);
+        }
+        .invite-field.code-input .status-icon.loading {
+            opacity: 1;
+            background: var(--accent-light);
+            color: var(--accent);
+        }
+
+        .invite-field .validation-msg {
+            font-size: 12px;
+            margin-top: 6px;
+            padding-left: 4px;
+            display: none;
+        }
+        .invite-field .validation-msg.show { display: block; }
+        .invite-field .validation-msg.error { color: var(--danger); }
+        .invite-field .validation-msg.success { color: #2e7d32; }
+
+        .invite-submit {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 16px 24px;
+            background: var(--accent);
+            border: none;
+            border-radius: var(--radius);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .invite-submit:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(193,127,36,0.25);
+        }
+        .invite-submit:active {
+            transform: translateY(0);
+            transition-duration: 0.1s;
+        }
+        .invite-submit:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .invite-submit .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            display: none;
+        }
+        .invite-submit.loading .spinner { display: block; }
+        .invite-submit.loading .btn-text { opacity: 0.5; }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .invite-error {
+            background: #fef2f0;
+            border: 1px solid #f0d5cf;
+            color: var(--danger);
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            display: none;
+            animation: shakeIn 0.4s ease;
+        }
+        .invite-error.show { display: block; }
+
+        @media (max-width: 480px) {
+            .invite-field.code-input input {
+                font-size: 16px;
+                letter-spacing: 2px;
+            }
+        }
+
+        /* Footer */
+        .login-footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-light);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .login-footer span {
+            font-size: 11px;
+            color: var(--text-3);
+            letter-spacing: 0.3px;
+        }
+        .login-footer .secure-badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            color: var(--text-3);
+        }
+        .login-footer .secure-badge svg {
+            width: 12px;
+            height: 12px;
+            opacity: 0.6;
+        }
+
+        /* === Responsive === */
+        @media (max-width: 960px) {
+            body { flex-direction: column; }
+            .brand-panel {
+                padding: 40px 24px 32px;
+                min-height: auto;
+            }
+            .brand-content h1 { font-size: 28px; }
+            .brand-features { gap: 24px; margin-top: 32px; }
+            .brand-panel .mesh { display: none; }
+            .brand-panel .dot-grid { display: none; }
+            .geo-float { display: none; }
+            .connection-lines { display: none; }
+            .login-panel {
+                width: 100%;
+                min-width: auto;
+                border-left: none;
+                border-top: 1px solid var(--border);
+                padding: 40px 24px 48px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .brand-panel { padding: 32px 20px 24px; }
+            .brand-content h1 { font-size: 24px; }
+            .brand-features { flex-wrap: wrap; gap: 16px; }
+            .login-panel { padding: 32px 20px 40px; }
+            .login-inner h2 { font-size: 24px; }
+            .login-footer { flex-direction: column; gap: 8px; align-items: center; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Left: Branding Panel -->
+    <div class="brand-panel">
+        <div class="mesh"></div>
+        <div class="dot-grid"></div>
+
+        <!-- Connection lines -->
+        <div class="connection-lines">
+            <svg viewBox="0 0 800 800" preserveAspectRatio="xMidYMid slice">
+                <path class="conn-line" d="M150,200 Q400,100 650,300"/>
+                <path class="conn-line" d="M100,500 Q350,350 700,450"/>
+                <path class="conn-line" d="M200,700 Q450,550 680,650"/>
+            </svg>
+        </div>
+
+        <!-- Floating geometric shapes -->
+        <div class="geo-float geo-1"></div>
+        <div class="geo-float geo-2"></div>
+        <div class="geo-float geo-3"></div>
+        <div class="geo-float geo-4"></div>
+        <div class="geo-float geo-5"></div>
+
+        <div class="brand-content">
+            <div class="brand-logo">
+                <div class="brand-logo-hex">
+                    <svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M36 4L66 20V52L36 68L6 52V20L36 4Z" stroke="var(--accent)" stroke-width="1.5" fill="none" opacity="0.3"/>
+                        <path d="M36 12L56 23V45L36 56L16 45V23L36 12Z" stroke="var(--accent)" stroke-width="1" fill="var(--accent-light)" opacity="0.5"/>
+                    </svg>
+                </div>
+                <span class="brand-logo-letter">T</span>
+            </div>
+            <h1>TradeLink</h1>
+            <p class="tagline">智能邮件自动化系统<br>连接全球商业机会</p>
+
+            <div class="brand-features">
+                <div class="brand-feat">
+                    <span class="brand-feat-icon">&#9650;</span>
+                    <span class="brand-feat-label">智能获客</span>
+                </div>
+                <div class="brand-feat">
+                    <span class="brand-feat-icon">&#9993;</span>
+                    <span class="brand-feat-label">精准触达</span>
+                </div>
+                <div class="brand-feat">
+                    <span class="brand-feat-icon">&#9733;</span>
+                    <span class="brand-feat-label">高效转化</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right: Login Panel -->
+    <div class="login-panel">
+        <div class="login-inner">
+            <h2>欢迎回来</h2>
+            <p class="subtitle">登录以访问您的 TradeLink 工作空间</p>
+
+            <div id="errorBox" class="error-msg"></div>
+
+            <a href="/login/google" class="google-btn">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                </svg>
+                <span>使用 Google 账号登录</span>
+            </a>
+
+            <!-- Invite Code Section -->
+            <div class="invite-section">
+                <div class="divider"><span>OR</span></div>
+
+                <button type="button" class="invite-toggle" id="inviteToggle" onclick="toggleInviteForm()">
+                    <span>&#128273; 内测邀请码登录</span>
+                    <span class="arrow">&#9660;</span>
+                </button>
+
+                <div class="invite-form" id="inviteForm">
+                    <div class="invite-form-inner">
+                        <div id="inviteError" class="invite-error"></div>
+
+                        <div class="invite-field code-input">
+                            <input type="text" id="inviteCode" placeholder="输入邀请码" maxlength="20" autocomplete="off" spellcheck="false">
+                            <div class="status-icon" id="codeStatusIcon"></div>
+                        </div>
+                        <div class="validation-msg" id="codeValidationMsg"></div>
+
+                        <div class="invite-field">
+                            <input type="text" id="inviteName" placeholder="您的名称" maxlength="50" autocomplete="off">
+                        </div>
+
+                        <button type="button" class="invite-submit" id="inviteSubmit" onclick="submitInviteLogin()" disabled>
+                            <div class="spinner"></div>
+                            <span class="btn-text">使用邀请码登录</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="login-footer">
+                <span>&copy; 2026 TradeLink</span>
+                <div class="secure-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                    <span>Secured by OAuth 2.0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const error = params.get('error');
+        const errorBox = document.getElementById('errorBox');
+        if (error) {
+            const messages = {
+                'oauth_failed': 'Google 授权失败，请重试',
+                'no_email': '无法获取邮箱信息',
+                'account_disabled': '账户已被禁用',
+                'oauth_error': '登录过程出错，请稍后重试'
+            };
+            errorBox.textContent = messages[error] || '登录失败，请重试';
+            errorBox.classList.add('show');
+        }
+
+        // === Invite Code Logic ===
+        let inviteCodeValid = false;
+        let validateTimer = null;
+
+        function toggleInviteForm() {
+            const toggle = document.getElementById('inviteToggle');
+            const form = document.getElementById('inviteForm');
+            toggle.classList.toggle('open');
+            form.classList.toggle('open');
+        }
+
+        const inviteCodeInput = document.getElementById('inviteCode');
+        const inviteNameInput = document.getElementById('inviteName');
+        const codeStatusIcon = document.getElementById('codeStatusIcon');
+        const codeValidationMsg = document.getElementById('codeValidationMsg');
+        const inviteSubmit = document.getElementById('inviteSubmit');
+        const inviteError = document.getElementById('inviteError');
+
+        // Auto uppercase on input
+        inviteCodeInput.addEventListener('input', function() {
+            this.value = this.value.toUpperCase();
+            // Reset validation state while typing
+            if (validateTimer) clearTimeout(validateTimer);
+            inviteCodeValid = false;
+            codeStatusIcon.className = 'status-icon';
+            codeValidationMsg.className = 'validation-msg';
+            codeValidationMsg.textContent = '';
+            updateSubmitState();
+        });
+
+        // Validate on blur
+        inviteCodeInput.addEventListener('blur', function() {
+            const code = this.value.trim();
+            if (!code) return;
+            validateInviteCode(code);
+        });
+
+        // Also validate on Enter
+        inviteCodeInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                inviteNameInput.focus();
+            }
+        });
+
+        inviteNameInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (!inviteSubmit.disabled) submitInviteLogin();
+            }
+        });
+
+        inviteNameInput.addEventListener('input', updateSubmitState);
+
+        function updateSubmitState() {
+            const code = inviteCodeInput.value.trim();
+            const name = inviteNameInput.value.trim();
+            inviteSubmit.disabled = !code || !name || !inviteCodeValid;
+        }
+
+        async function validateInviteCode(code) {
+            // Show loading
+            codeStatusIcon.className = 'status-icon show loading';
+            codeStatusIcon.innerHTML = '&#8230;';
+            codeValidationMsg.className = 'validation-msg';
+            codeValidationMsg.textContent = '';
+
+            try {
+                const resp = await fetch('/api/invite/validate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: code })
+                });
+                const data = await resp.json();
+
+                if (resp.ok && data.valid) {
+                    inviteCodeValid = true;
+                    codeStatusIcon.className = 'status-icon show valid';
+                    codeStatusIcon.innerHTML = '&#10003;';
+                    codeValidationMsg.className = 'validation-msg show success';
+                    codeValidationMsg.textContent = data.message || '邀请码有效';
+                } else {
+                    inviteCodeValid = false;
+                    codeStatusIcon.className = 'status-icon show invalid';
+                    codeStatusIcon.innerHTML = '&#10007;';
+                    codeValidationMsg.className = 'validation-msg show error';
+                    codeValidationMsg.textContent = data.message || data.error || '邀请码无效';
+                }
+            } catch (err) {
+                inviteCodeValid = false;
+                codeStatusIcon.className = 'status-icon show invalid';
+                codeStatusIcon.innerHTML = '&#10007;';
+                codeValidationMsg.className = 'validation-msg show error';
+                codeValidationMsg.textContent = '验证失败，请检查网络连接';
+            }
+            updateSubmitState();
+        }
+
+        async function submitInviteLogin() {
+            const code = inviteCodeInput.value.trim();
+            const name = inviteNameInput.value.trim();
+            if (!code || !name || !inviteCodeValid) return;
+
+            inviteSubmit.classList.add('loading');
+            inviteSubmit.disabled = true;
+            inviteError.className = 'invite-error';
+            inviteError.textContent = '';
+
+            try {
+                const resp = await fetch('/login/invite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: code, name: name })
+                });
+                const data = await resp.json();
+
+                if (resp.ok) {
+                    // Login successful
+                    window.location.href = '/';
+                } else {
+                    inviteError.textContent = data.message || data.error || '登录失败，请重试';
+                    inviteError.classList.add('show');
+                    inviteSubmit.classList.remove('loading');
+                    inviteSubmit.disabled = false;
+                }
+            } catch (err) {
+                inviteError.textContent = '网络错误，请稍后重试';
+                inviteError.classList.add('show');
+                inviteSubmit.classList.remove('loading');
+                inviteSubmit.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

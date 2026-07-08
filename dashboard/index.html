@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Niteo Solar - 智能邮件自动化系统</title>
+    <title>TradeLink - 智能邮件自动化系统</title>
     <script>
         // 强制刷新缓存检测 - 确保加载最新版本
         (function() {
@@ -25,6 +25,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+    <script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
     <style>
         :root {
             --bg: #f5f5f8;
@@ -156,6 +157,7 @@
             margin-left: 256px;
             flex: 1;
             min-height: 100vh;
+            overflow-x: hidden;
         }
 
         .topbar {
@@ -291,11 +293,20 @@
         .card-body { padding: 20px 22px; }
 
         /* === TABLE === */
-        .table-wrap { overflow-x: auto; }
+        .table-wrap {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+        .table-wrap::-webkit-scrollbar { height: 6px; }
+        .table-wrap::-webkit-scrollbar-track { background: transparent; }
+        .table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .table-wrap::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
 
         table { width: 100%; border-collapse: collapse; }
 
-        #cust-table-wrap { table-layout: fixed; }
+        #cust-table-wrap { table-layout: auto; min-width: 700px; }
 
         th {
             text-align: left;
@@ -314,6 +325,7 @@
             font-size: 0.84rem;
             border-bottom: 1px solid var(--border);
             color: var(--text);
+            white-space: nowrap;
         }
 
         tr:hover td { background: rgba(0,0,0,0.02); }
@@ -530,6 +542,30 @@
         .platform-card[data-platform="web_search"].active { border-color: #4a7de4; }
         .platform-card[data-platform="web_search"].active .platform-icon { color: #4a7de4; }
 
+        /* === KEYWORD ANALYZER === */
+        .kw-category { margin-bottom: 20px; }
+        .kw-category-title { font-size: 0.85rem; font-weight: 600; color: var(--text); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+        .kw-category-count { font-size: 0.72rem; color: var(--text-3); font-weight: 400; }
+        .kw-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+        .kw-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 12px; border-radius: 20px; border: 1.5px solid var(--border);
+            background: var(--surface); cursor: pointer; font-size: 0.82rem;
+            transition: all .15s; user-select: none;
+        }
+        .kw-chip:hover { border-color: var(--border-hover); transform: translateY(-1px); }
+        .kw-chip.selected { border-color: var(--accent); background: rgba(232,93,74,0.08); color: var(--accent); }
+        .kw-chip .kw-check { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 9px; color: transparent; transition: all .15s; }
+        .kw-chip.selected .kw-check { border-color: var(--accent); background: var(--accent); color: #fff; }
+        .kw-chip.original { border-color: var(--blue); background: rgba(74,125,228,0.06); }
+        .kw-chip.original.selected { border-color: var(--blue); background: rgba(74,125,228,0.15); color: var(--blue); }
+        .kw-chip.original.selected .kw-check { border-color: var(--blue); background: var(--blue); }
+        .kw-chip.business { border-color: var(--teal); background: rgba(42,157,143,0.06); }
+        .kw-chip.business.selected { border-color: var(--teal); background: rgba(42,157,143,0.15); color: var(--teal); }
+        .kw-chip.business.selected .kw-check { border-color: var(--teal); background: var(--teal); }
+        .kw-chip.location { border-color: var(--gold); background: rgba(201,148,62,0.06); }
+        .kw-chip.location.selected { border-color: var(--gold); background: rgba(201,148,62,0.15); color: var(--gold); }
+        .kw-chip.location.selected .kw-check { border-color: var(--gold); background: var(--gold); }
 
         .stat-card .stat-icon {
             width: 40px;
@@ -951,6 +987,7 @@
         .toast-ok { background: rgba(62,207,180,0.15); color: var(--teal); border: 1px solid rgba(62,207,180,0.3); }
         .toast-err { background: rgba(232,93,74,0.15); color: var(--accent); border: 1px solid rgba(232,93,74,0.3); }
         .toast-info { background: rgba(91,141,239,0.15); color: var(--blue); border: 1px solid rgba(91,141,239,0.3); }
+        .toast-warn { background: rgba(255,183,77,0.15); color: #f57c00; border: 1px solid rgba(255,183,77,0.3); }
 
         @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
 
@@ -1002,6 +1039,15 @@
         .page-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
         .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
+        /* === MATERIAL CARDS === */
+        .material-card { cursor: pointer; }
+        .material-card:hover {
+            border-color: var(--border-hover) !important;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+        }
+        .material-card:hover > div:first-child { opacity: 1 !important; }
+
         /* === RESPONSIVE === */
         @media (max-width: 900px) {
             .sidebar { transform: translateX(-100%); }
@@ -1010,6 +1056,49 @@
             .page-content { padding: 20px 16px; }
             .topbar { padding: 16px 20px; }
             .mobile-menu { display: flex !important; }
+        }
+
+        /* === 两栏通用布局 === */
+        .two-col-layout {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+        .two-col-sidebar {
+            width: 200px;
+            flex-shrink: 0;
+        }
+
+        /* === 客户管理两栏响应式 === */
+        @media (max-width: 1200px) {
+            .two-col-sidebar { width: 170px !important; }
+        }
+
+        @media (max-width: 900px) {
+            .material-grid { grid-template-columns: 1fr !important; }
+            .two-col-layout {
+                flex-direction: column !important;
+            }
+            .two-col-sidebar {
+                width: 100% !important;
+            }
+            .two-col-sidebar .card-body {
+                max-height: 200px !important;
+            }
+            .two-col-sidebar #country-list,
+            .two-col-sidebar #log-country-list {
+                flex-direction: row !important;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            .two-col-sidebar #country-list > div,
+            .two-col-sidebar #log-country-list > div {
+                padding: 6px 12px !important;
+            }
+            .table-wrap { overflow-x: auto; }
+            #cust-search { width: 100% !important; }
+            #cust-table th, #cust-table td { white-space: nowrap; }
+            .card-head { flex-wrap: wrap; }
         }
 
         .mobile-menu {
@@ -1038,6 +1127,72 @@
         }
         .empty .icon { font-size: 2.5rem; margin-bottom: 12px; }
         .empty .title { font-size: 1rem; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
+
+        /* === USER MENU === */
+        .user-menu {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: var(--radius-sm);
+            transition: background 0.15s;
+        }
+        .user-menu:hover { background: var(--surface-2); }
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: var(--surface-3);
+        }
+        .user-info { display: flex; flex-direction: column; line-height: 1.3; }
+        .user-name { font-size: 0.8rem; font-weight: 600; color: var(--text); }
+        .user-role { font-size: 0.7rem; color: var(--text-3); }
+        .user-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            box-shadow: var(--shadow);
+            min-width: 180px;
+            display: none;
+            z-index: 100;
+            overflow: hidden;
+        }
+        .user-dropdown.show { display: block; }
+        .user-dropdown a, .user-dropdown button {
+            display: block;
+            width: 100%;
+            padding: 10px 14px;
+            font-size: 0.82rem;
+            color: var(--text-2);
+            text-decoration: none;
+            border: none;
+            background: none;
+            text-align: left;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.15s;
+        }
+        .user-dropdown a:hover, .user-dropdown button:hover { background: var(--surface-2); color: var(--text); }
+        .user-dropdown .divider-h {
+            height: 1px;
+            background: var(--border);
+            margin: 4px 0;
+        }
+
+        /* === ADMIN TABS === */
+        .admin-tabs { display:flex; gap:4px; margin-bottom:20px; border-bottom:2px solid var(--border); padding-bottom:0; }
+        .admin-tab { padding:10px 20px; cursor:pointer; font-size:0.88rem; font-weight:600; color:var(--text-3); border-bottom:2px solid transparent; margin-bottom:-2px; transition:all .15s; user-select:none; }
+        .admin-tab:hover { color:var(--text); }
+        .admin-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+        .admin-panel { display:none; }
+        .admin-panel.active { display:block; }
+        .admin-trend-range.active { background:var(--accent); color:#fff; border-color:var(--accent); }
     </style>
 </head>
 <body>
@@ -1046,10 +1201,10 @@
     <!-- Sidebar -->
     <aside class="sidebar">
         <div class="sidebar-brand">
-            <h1>Niteo Solar</h1>
+            <h1>TradeLink</h1>
             <div class="sub">Email Automation System</div>
         </div>
-        <nav class="sidebar-nav">
+        <nav class="sidebar-nav" id="nav-client">
             <div class="nav-group">
                 <div class="nav-group-label">概览</div>
                 <div class="nav-link active" data-page="dashboard">
@@ -1093,6 +1248,32 @@
                 </div>
             </div>
         </nav>
+        <nav class="sidebar-nav" id="nav-admin" style="display:none">
+            <div class="nav-group">
+                <div class="nav-group-label">管理中心</div>
+                <div class="nav-link active" data-admin-tab="overview" data-page="admin" onclick="switchAdminNav('overview')">
+                    <span class="icon">📊</span> 数据概览
+                </div>
+                <div class="nav-link" data-admin-tab="customers" data-page="admin" onclick="switchAdminNav('customers')">
+                    <span class="icon">◉</span> 客户分析
+                </div>
+                <div class="nav-link" data-admin-tab="sending" data-page="admin" onclick="switchAdminNav('sending')">
+                    <span class="icon">✉</span> 发送监控
+                </div>
+                <div class="nav-link" data-admin-tab="leads" data-page="admin" onclick="switchAdminNav('leads')">
+                    <span class="icon">🔍</span> 获客管理
+                </div>
+                <div class="nav-link" data-admin-tab="system" data-page="admin" onclick="switchAdminNav('system')">
+                    <span class="icon">⚙</span> 系统管理
+                </div>
+            </div>
+            <div class="nav-group">
+                <div class="nav-group-label">切换</div>
+                <div class="nav-link" data-page="dashboard" onclick="navigate('dashboard')">
+                    <span class="icon">←</span> 返回客户端
+                </div>
+            </div>
+        </nav>
         <div class="sidebar-bottom">
             <span class="ver">v2.0</span> &nbsp;·&nbsp; 2026-06-17
         </div>
@@ -1104,6 +1285,19 @@
             <h2 id="page-title">仪表盘</h2>
             <div class="topbar-actions">
                 <button class="btn btn-ghost btn-sm" onclick="refreshPage()">↻ 刷新</button>
+                <div class="user-menu" onclick="this.querySelector('.user-dropdown').classList.toggle('show')">
+                    <img id="user-avatar" class="user-avatar" src="" alt="">
+                    <div class="user-info">
+                        <span id="user-name" class="user-name">加载中...</span>
+                        <span id="user-role" class="user-role"></span>
+                    </div>
+                    <div class="user-dropdown" onclick="event.stopPropagation()">
+                        <a href="#" onclick="navigate('settings');return false">⚙ 个人设置</a>
+                        <a id="admin-link" href="#" onclick="navigate('admin');return false" style="display:none">🔒 管理员面板</a>
+                        <div class="divider-h"></div>
+                        <button onclick="logout()">⎋ 退出登录</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1254,9 +1448,9 @@
                     <button class="btn btn-teal" onclick="openImportModal()">📥 批量导入</button>
                     <button class="btn btn-ghost" id="btn-batch-delete" onclick="batchDeleteCustomers()" disabled>🗑 批量删除</button>
                 </div>
-                <div style="display:flex;gap:16px;align-items:flex-start">
+                <div class="two-col-layout">
                     <!-- 左侧国家筛选栏 -->
-                    <div style="width:200px;flex-shrink:0">
+                    <div class="two-col-sidebar">
                         <div class="card" style="position:sticky;top:16px">
                             <div class="card-head" style="padding:14px 16px">
                                 <h3 style="font-size:0.85rem">🌍 国家</h3>
@@ -1294,9 +1488,9 @@
 
             <!-- ====== LOGS ====== -->
             <div class="page" id="page-logs">
-                <div style="display:flex;gap:16px;align-items:flex-start">
+                <div class="two-col-layout">
                     <!-- 左侧国家栏 -->
-                    <div style="width:200px;flex-shrink:0">
+                    <div class="two-col-sidebar">
                         <div class="card" style="position:sticky;top:16px">
                             <div class="card-head" style="padding:14px 16px">
                                 <h3 style="font-size:0.85rem">🌍 国家</h3>
@@ -1415,6 +1609,16 @@
                                     <div class="info-grid" style="margin-bottom:16px">
                                         <div class="info-row"><span class="k">客户</span><span class="v" id="send-cust-name">-</span></div>
                                         <div class="info-row"><span class="k">已选邮箱</span><span class="v" id="send-cust-emails">-</span></div>
+                                    </div>
+                                    <!-- 资料选择器 -->
+                                    <div style="margin-bottom:16px;padding:14px;background:var(--bg);border-radius:12px;border:1px solid var(--surface-2)">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                                            <label style="font-size:0.85rem;color:var(--text-2);font-weight:600">📚 关联资料（可选）</label>
+                                            <span id="material-selector-status" style="font-size:0.78rem;color:var(--text-3)">未选择</span>
+                                        </div>
+                                        <div id="send-material-list" style="max-height:180px;overflow-y:auto;display:none"></div>
+                                        <div id="send-material-empty" style="font-size:0.8rem;color:var(--text-3);text-align:center;padding:12px">选择客户后加载可用资料...</div>
+                                        <div id="send-selected-material-tags" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;min-height:28px"></div>
                                     </div>
                                     <!-- 字数控制 -->
                                     <div style="margin-bottom:16px;padding:12px;background:var(--bg);border-radius:10px;border:1px solid var(--surface-2)">
@@ -1672,54 +1876,109 @@
 
             <!-- ====== MATERIALS ====== -->
             <div class="page" id="page-materials">
-                <div class="stats-row" id="material-stats"></div>
-                <div class="card">
+                <!-- 顶部工具栏 -->
+                <div class="card" style="margin-bottom:20px">
                     <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-                        <h3>📚 资料库</h3>
+                        <div style="display:flex;align-items:center;gap:12px">
+                            <h3>📚 资料库</h3>
+                            <span style="font-size:0.8rem;color:var(--text-3)">AI 生成邮件前会自动检索匹配的资料</span>
+                        </div>
                         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-                            <input type="text" id="material-search" placeholder="搜索资料..." style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:0.82rem;min-width:180px" oninput="loadMaterials()">
-                            <select id="material-filter-type" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:0.82rem;background:var(--bg)" onchange="loadMaterials()">
+                            <input type="text" id="material-search" placeholder="搜索资料..." style="padding:8px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:0.82rem;min-width:200px;background:var(--bg)" oninput="loadMaterials()">
+                            <select id="material-filter-type" style="padding:8px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:0.82rem;background:var(--bg)" onchange="loadMaterials()">
                                 <option value="">全部类型</option>
                             </select>
-                            <button class="btn btn-accent btn-sm" onclick="openMaterialModal()">+ 添加资料</button>
-                            <button class="btn btn-sm" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff" onclick="openAIImportModal()">🤖 AI智能导入</button>
+                            <button class="btn btn-sm" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff" onclick="openAIImportModal()">🤖 AI 智能导入</button>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <div class="table-wrap">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>名称</th>
-                                        <th>类型</th>
-                                        <th>分类</th>
-                                        <th>范围</th>
-                                        <th>赛道</th>
-                                        <th>优先级</th>
-                                        <th>状态</th>
-                                        <th style="text-align:right">操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="materials-table-body">
-                                    <tr><td colspan="8" class="cell-muted" style="text-align:center">加载中...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div id="materials-pagination" style="display:flex;justify-content:center;gap:8px;margin-top:16px"></div>
-                        <!-- AI批量导入进度 -->
-                        <div id="ai-batch-progress" style="display:none;margin-top:16px;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
-                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                                <span style="font-weight:600;color:var(--accent)">🤖 AI批量导入中...</span>
-                                <span id="ai-batch-status-text" style="font-size:0.85rem;color:var(--muted)"></span>
-                            </div>
-                            <div style="height:6px;background:var(--bg2);border-radius:3px;overflow:hidden">
-                                <div id="ai-batch-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#667eea,#764ba2);border-radius:3px;transition:width 0.3s"></div>
-                            </div>
-                            <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:0.8rem;color:var(--muted)">
-                                <span id="ai-batch-detail"></span>
-                                <span id="ai-batch-count"></span>
+                </div>
+
+                <!-- 发信人信息卡片 -->
+                <div class="card" id="sender-info-panel" style="margin-bottom:20px;border:1.5px solid rgba(74,125,228,0.15);background:linear-gradient(135deg,rgba(74,125,228,0.03),rgba(102,126,234,0.03))">
+                    <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+                        <div style="display:flex;align-items:center;gap:12px">
+                            <div style="width:40px;height:40px;border-radius:12px;background:rgba(74,125,228,0.1);display:flex;align-items:center;justify-content:center;font-size:20px">📝</div>
+                            <div>
+                                <h3 style="font-size:1rem;font-weight:600">发信人信息</h3>
+                                <p style="font-size:0.78rem;color:var(--text-3);margin-top:2px">邮件签名与发件人资料配置</p>
                             </div>
                         </div>
+                        <button class="btn btn-accent btn-sm" onclick="openSenderInfoModal()">编辑资料</button>
+                    </div>
+                    <div class="card-body" id="sender-info-card-body" style="padding:16px 22px">
+                        <div style="font-size:0.85rem;color:var(--text-3)">加载中...</div>
+                    </div>
+                </div>
+
+                <!-- 统计卡片 -->
+                <div class="stats-row" id="material-stats" style="margin-bottom:20px"></div>
+
+                <!-- 三大分区 -->
+                <div id="material-zones-container" style="display:flex;flex-direction:column;gap:24px">
+                    <!-- Zone: Personal Info -->
+                    <div class="material-zone" data-zone="personal">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+                            <div style="display:flex;align-items:center;gap:10px">
+                                <div style="width:36px;height:36px;border-radius:10px;background:rgba(74,125,228,0.1);display:flex;align-items:center;justify-content:center;font-size:18px">👤</div>
+                                <div>
+                                    <h3 style="font-size:1rem;font-weight:600">个人信息</h3>
+                                    <p style="font-size:0.75rem;color:var(--text-3);margin-top:2px">发件人自我介绍、职位信息等</p>
+                                </div>
+                            </div>
+                            <button class="btn btn-accent btn-sm" onclick="openMaterialModal('personal_info')">+ 添加</button>
+                        </div>
+                        <div class="material-grid" id="material-grid-personal" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+                            <div class="cell-muted" style="text-align:center;padding:40px 20px">加载中...</div>
+                        </div>
+                    </div>
+
+                    <!-- Zone: Company Profile -->
+                    <div class="material-zone" data-zone="company">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+                            <div style="display:flex;align-items:center;gap:10px">
+                                <div style="width:36px;height:36px;border-radius:10px;background:rgba(201,148,62,0.1);display:flex;align-items:center;justify-content:center;font-size:18px">🏢</div>
+                                <div>
+                                    <h3 style="font-size:1rem;font-weight:600">公司简介</h3>
+                                    <p style="font-size:0.75rem;color:var(--text-3);margin-top:2px">公司背景、主营业务、核心优势</p>
+                                </div>
+                            </div>
+                            <button class="btn btn-accent btn-sm" onclick="openMaterialModal('company_intro')">+ 添加</button>
+                        </div>
+                        <div class="material-grid" id="material-grid-company" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+                            <div class="cell-muted" style="text-align:center;padding:40px 20px">加载中...</div>
+                        </div>
+                    </div>
+
+                    <!-- Zone: Product Materials -->
+                    <div class="material-zone" data-zone="product">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+                            <div style="display:flex;align-items:center;gap:10px">
+                                <div style="width:36px;height:36px;border-radius:10px;background:rgba(46,125,50,0.1);display:flex;align-items:center;justify-content:center;font-size:18px">📦</div>
+                                <div>
+                                    <h3 style="font-size:1rem;font-weight:600">产品资料</h3>
+                                    <p style="font-size:0.75rem;color:var(--text-3);margin-top:2px">产品优势、案例、宣传册、储能方案</p>
+                                </div>
+                            </div>
+                            <button class="btn btn-accent btn-sm" onclick="openMaterialModal('advantage')">+ 添加</button>
+                        </div>
+                        <div class="material-grid" id="material-grid-product" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+                            <div class="cell-muted" style="text-align:center;padding:40px 20px">加载中...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI批量导入进度 -->
+                <div id="ai-batch-progress" style="display:none;margin-top:24px;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                        <span style="font-weight:600;color:var(--accent)">🤖 AI批量导入中...</span>
+                        <span id="ai-batch-status-text" style="font-size:0.85rem;color:var(--muted)"></span>
+                    </div>
+                    <div style="height:6px;background:var(--bg2);border-radius:3px;overflow:hidden">
+                        <div id="ai-batch-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#667eea,#764ba2);border-radius:3px;transition:width 0.3s"></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:0.8rem;color:var(--muted)">
+                        <span id="ai-batch-detail"></span>
+                        <span id="ai-batch-count"></span>
                     </div>
                 </div>
             </div>
@@ -1745,12 +2004,13 @@
                             <div class="form-group">
                                 <label class="form-label">类型 *</label>
                                 <select class="form-input" id="mat-type">
+                                    <option value="personal_info">个人信息</option>
+                                    <option value="company_intro">公司简介</option>
                                     <option value="advantage">优势</option>
                                     <option value="brochure">宣传册</option>
                                     <option value="case_study">案例</option>
                                     <option value="storage">储能</option>
                                     <option value="rule">规则</option>
-                                    <option value="company_intro">公司简介</option>
                                     <option value="custom">自定义</option>
                                 </select>
                             </div>
@@ -1905,6 +2165,272 @@
                         </div>
                         <div class="card-body" id="settings-scheduler"></div>
                     </div>
+                    <div class="card">
+                        <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+                            <h3>📝 邮件规范</h3>
+                            <button class="btn btn-ghost btn-sm" onclick="editEmailGuidelines()">✏️ 编辑</button>
+                        </div>
+                        <div class="card-body" id="settings-guidelines"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ====== ADMIN ====== -->
+            <div class="page" id="page-admin">
+                <!-- Tab 导航 -->
+                <div class="admin-tabs">
+                    <div class="admin-tab active" data-tab="overview">数据概览</div>
+                    <div class="admin-tab" data-tab="customers">客户分析</div>
+                    <div class="admin-tab" data-tab="sending">发送监控</div>
+                    <div class="admin-tab" data-tab="leads">获客管理</div>
+                    <div class="admin-tab" data-tab="system">系统管理</div>
+                </div>
+
+                <!-- Tab 1: 数据概览 -->
+                <div class="admin-panel active" id="admin-panel-overview">
+                    <!-- 第一行：核心统计卡片 -->
+                    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px">
+                        <div class="stat-card"><div class="label">客户总数</div><div class="value c-teal" id="as-cust">-</div><div class="sub" id="as-cust-sub"></div></div>
+                        <div class="stat-card"><div class="label">邮箱总数</div><div class="value c-blue" id="as-email">-</div><div class="sub" id="as-email-sub"></div></div>
+                        <div class="stat-card"><div class="label">已发送邮件</div><div class="value c-accent" id="as-sent">-</div><div class="sub" id="as-sent-sub"></div></div>
+                        <div class="stat-card"><div class="label">失败邮件</div><div class="value" style="color:#e74c3c" id="as-failed">-</div><div class="sub" id="as-failed-sub"></div></div>
+                        <div class="stat-card"><div class="label">今日发送</div><div class="value c-gold" id="as-today">-</div><div class="sub" id="as-today-sub"></div></div>
+                    </div>
+
+                    <!-- 第二行：次要统计 -->
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+                        <div class="stat-card"><div class="label">覆盖国家</div><div class="value c-purple" id="as-countries">-</div><div class="sub">个目标市场</div></div>
+                        <div class="stat-card"><div class="label">联系人</div><div class="value" id="as-contacts">-</div><div class="sub">活跃联系人</div></div>
+                        <div class="stat-card"><div class="label">搜索任务</div><div class="value" id="as-search">-</div><div class="sub">累计搜索</div></div>
+                        <div class="stat-card"><div class="label">素材资料</div><div class="value" id="as-materials">-</div><div class="sub">已上传素材</div></div>
+                    </div>
+
+                    <!-- 第三行：发送趋势 + 国家分布 -->
+                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px">
+                        <div class="card">
+                            <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+                                <h3>📈 发送趋势</h3>
+                                <div style="display:flex;gap:4px">
+                                    <button class="btn btn-sm btn-ghost admin-trend-range active" data-days="7" onclick="switchTrendRange(7,this)">7天</button>
+                                    <button class="btn btn-sm btn-ghost admin-trend-range" data-days="30" onclick="switchTrendRange(30,this)">30天</button>
+                                    <button class="btn btn-sm btn-ghost admin-trend-range" data-days="90" onclick="switchTrendRange(90,this)">90天</button>
+                                </div>
+                            </div>
+                            <div class="card-body" style="padding:16px">
+                                <canvas id="admin-trend-chart" height="200"></canvas>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-head"><h3>🌍 国家分布 TOP 10</h3></div>
+                            <div class="card-body" id="admin-country-dist" style="position:relative;height:260px">
+                                <canvas id="admin-country-chart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 第四行：来源分布 + 行业分布 + 邮箱类型 -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px">
+                        <div class="card">
+                            <div class="card-head"><h3>👥 联系人来源</h3></div>
+                            <div class="card-body" id="admin-source-dist" style="position:relative;height:260px">
+                                <canvas id="admin-source-chart"></canvas>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-head"><h3>🏭 行业分布 TOP 10</h3></div>
+                            <div class="card-body" id="admin-industry-dist" style="position:relative;height:260px">
+                                <canvas id="admin-industry-chart"></canvas>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-head"><h3>📧 邮箱类型</h3></div>
+                            <div class="card-body" id="admin-email-type-dist" style="position:relative;height:260px">
+                                <canvas id="admin-email-type-chart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: 客户分析 -->
+                <div class="admin-panel" id="admin-panel-customers">
+                    <div class="card">
+                        <div class="card-head" style="justify-content:space-between">
+                            <h3>📋 客户列表</h3>
+                            <div style="display:flex;gap:8px;align-items:center">
+                                <input type="text" class="form-input" id="admin-cust-search" placeholder="搜索公司名/网站..." style="width:200px;font-size:0.82rem">
+                                <select class="form-input" id="admin-cust-country" style="width:120px;font-size:0.82rem">
+                                    <option value="">全部国家</option>
+                                </select>
+                                <select class="form-input" id="admin-cust-sort" style="width:140px;font-size:0.82rem">
+                                    <option value="recent_sent">最近发送</option>
+                                    <option value="sent_count">发送量</option>
+                                    <option value="name">公司名称</option>
+                                    <option value="country">国家</option>
+                                    <option value="created">创建时间</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="card-body" style="overflow-x:auto">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>公司名称</th>
+                                        <th>国家</th>
+                                        <th>行业</th>
+                                        <th>邮箱</th>
+                                        <th>联系人</th>
+                                        <th>已发送</th>
+                                        <th>失败</th>
+                                        <th>最近发送</th>
+                                        <th>创建时间</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-cust-tbody"></tbody>
+                            </table>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px">
+                                <span style="font-size:0.82rem;color:var(--text-3)" id="admin-cust-info"></span>
+                                <div style="display:flex;gap:6px" id="admin-cust-pagination"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: 发送监控 -->
+                <div class="admin-panel" id="admin-panel-sending">
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
+                        <div class="stat-card"><div class="label">待发送</div><div class="value c-gold" id="as-queue-pending">-</div></div>
+                        <div class="stat-card"><div class="label">进行中</div><div class="value c-blue" id="as-queue-running">-</div></div>
+                        <div class="stat-card"><div class="label">今日发送</div><div class="value c-teal" id="as-queue-today">-</div></div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: 获客管理 -->
+                <div class="admin-panel" id="admin-panel-leads">
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
+                        <div class="stat-card"><div class="label">运行中</div><div class="value c-blue" id="as-search-running">-</div></div>
+                        <div class="stat-card"><div class="label">已完成</div><div class="value c-teal" id="as-search-completed">-</div></div>
+                        <div class="stat-card"><div class="label">失败</div><div class="value" style="color:#e74c3c" id="as-search-failed">-</div></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-head"><h3>搜索任务列表</h3></div>
+                        <div class="card-body">
+                            <table class="data-table">
+                                <thead><tr><th>任务名</th><th>关键词</th><th>状态</th><th>发现</th><th>导入</th><th>创建时间</th></tr></thead>
+                                <tbody id="admin-search-tasks-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 5: 系统管理 -->
+                <div class="admin-panel" id="admin-panel-system">
+                    <!-- 系统健康监控 -->
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+                        <div class="stat-card"><div class="label">内存使用</div><div class="value c-blue" id="as-health-memory">-</div><div class="sub" id="as-health-memory-sub"></div></div>
+                        <div class="stat-card"><div class="label">磁盘使用</div><div class="value c-teal" id="as-health-disk">-</div><div class="sub" id="as-health-disk-sub"></div></div>
+                        <div class="stat-card"><div class="label">数据库大小</div><div class="value c-purple" id="as-health-db">-</div><div class="sub" id="as-health-db-sub"></div></div>
+                        <div class="stat-card"><div class="label">运行时间</div><div class="value c-gold" id="as-health-uptime">-</div><div class="sub" id="as-health-uptime-sub"></div></div>
+                    </div>
+                    <!-- 用户管理 -->
+                    <div class="card">
+                        <div class="card-head"><h3>👤 用户管理</h3></div>
+                        <div class="card-body" style="overflow-x:auto">
+                            <table class="data-table">
+                                <thead><tr><th>ID</th><th>邮箱</th><th>名称</th><th>角色</th><th>状态</th><th>创建时间</th><th>最后登录</th></tr></thead>
+                                <tbody id="admin-users-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Invite Code Management -->
+                    <div id="invite-code-section" style="margin-top:24px">
+                        <div class="card">
+                            <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+                                <h3>&#128273; 邀请码管理</h3>
+                                <button class="btn btn-accent btn-sm" onclick="toggleInviteGenForm()">+ 生成邀请码</button>
+                            </div>
+                            <div class="card-body">
+                                <!-- Stats Summary -->
+                                <div class="stats-row" id="invite-stats-row" style="margin-bottom:20px">
+                                    <div class="stat-card">
+                                        <div class="label">总生成数</div>
+                                        <div class="value" id="inv-stat-total">-</div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="label">活跃数</div>
+                                        <div class="value c-teal" id="inv-stat-active">-</div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="label">总使用次数</div>
+                                        <div class="value" id="inv-stat-uses">-</div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="label">独立用户数</div>
+                                        <div class="value" id="inv-stat-users">-</div>
+                                    </div>
+                                </div>
+
+                                <!-- Generate Form (collapsible) -->
+                                <div id="invite-gen-form" style="display:none;margin-bottom:20px">
+                                    <div style="background:var(--bg);border-radius:var(--radius);padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                                        <div>
+                                            <label style="font-size:0.78rem;color:var(--text-3);font-weight:600;display:block;margin-bottom:6px">生成数量</label>
+                                            <input type="number" id="inv-gen-count" value="1" min="1" max="50" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:0.84rem;color:var(--text);background:var(--surface);outline:none" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+                                        </div>
+                                        <div>
+                                            <label style="font-size:0.78rem;color:var(--text-3);font-weight:600;display:block;margin-bottom:6px">每码最大使用次数</label>
+                                            <input type="number" id="inv-gen-max-uses" value="1" min="1" max="1000" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:0.84rem;color:var(--text);background:var(--surface);outline:none" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+                                        </div>
+                                        <div>
+                                            <label style="font-size:0.78rem;color:var(--text-3);font-weight:600;display:block;margin-bottom:6px">有效期</label>
+                                            <select id="inv-gen-expiry" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:0.84rem;color:var(--text);background:var(--surface);outline:none;cursor:pointer">
+                                                <option value="7">7 天</option>
+                                                <option value="30" selected>30 天</option>
+                                                <option value="90">90 天</option>
+                                                <option value="0">永不过期</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="font-size:0.78rem;color:var(--text-3);font-weight:600;display:block;margin-bottom:6px">备注</label>
+                                            <input type="text" id="inv-gen-note" placeholder="可选备注信息" maxlength="100" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:0.84rem;color:var(--text);background:var(--surface);outline:none" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+                                        </div>
+                                        <div style="grid-column:1/-1;display:flex;justify-content:flex-end;gap:10px">
+                                            <button class="btn btn-ghost btn-sm" onclick="toggleInviteGenForm()">取消</button>
+                                            <button class="btn btn-accent btn-sm" onclick="generateInviteCodes()" id="inv-gen-btn">批量生成</button>
+                                        </div>
+                                    </div>
+                                    <!-- Generated codes display -->
+                                    <div id="inv-gen-result" style="display:none;margin-top:14px;background:var(--bg);border-radius:var(--radius-sm);padding:14px">
+                                        <div style="font-size:0.78rem;font-weight:600;color:var(--text-3);margin-bottom:8px">已生成邀请码：</div>
+                                        <div id="inv-gen-codes-list" style="display:flex;flex-direction:column;gap:6px"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Invite Codes Table -->
+                                <div class="table-wrap">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>邀请码</th>
+                                                <th>状态</th>
+                                                <th>已用/总量</th>
+                                                <th>备注</th>
+                                                <th>创建时间</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="invite-codes-tbody">
+                                            <tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:30px">加载中...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <!-- Pagination -->
+                                <div style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:16px" id="invite-pagination"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1956,12 +2482,18 @@
 
             <!-- API 配置弹窗 -->
             <div class="modal-overlay" id="api-config-modal" style="display:none">
-                <div class="modal" style="max-width:520px">
+                <div class="modal" style="max-width:580px">
                     <div class="modal-head">
                         <h3 id="api-modal-title">添加 API 配置</h3>
                         <button class="modal-close" onclick="closeApiConfigModal()">&times;</button>
                     </div>
                     <div class="modal-body">
+                        <!-- 预设选择区（仅新增时显示） -->
+                        <div id="api-preset-section" style="margin-bottom:20px">
+                            <div class="form-label" style="margin-bottom:10px">选择 API 类型</div>
+                            <div id="api-preset-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px"></div>
+                        </div>
+
                         <div class="form-group">
                             <div class="form-label">API 名称 <span style="color:var(--danger)">*</span></div>
                             <input type="text" class="form-input" id="api-name" placeholder="例如: DeepSeek">
@@ -1970,13 +2502,17 @@
                             <div class="form-label">API Key <span style="color:var(--danger)">*</span></div>
                             <input type="text" class="form-input" id="api-key" placeholder="输入 API Key" style="font-family:monospace;font-size:0.82rem;letter-spacing:0.3px">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" id="api-url-group">
                             <div class="form-label">Base URL</div>
                             <input type="text" class="form-input" id="api-base-url" placeholder="例如: https://api.deepseek.com">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" id="api-model-group">
                             <div class="form-label">模型</div>
                             <input type="text" class="form-input" id="api-model" placeholder="例如: deepseek-v4-pro">
+                        </div>
+                        <div class="form-group" id="api-desc-group" style="display:none">
+                            <div class="form-label">说明</div>
+                            <div id="api-desc-text" style="font-size:0.82rem;color:var(--text-2);line-height:1.6;background:var(--surface-2);padding:10px 14px;border-radius:8px"></div>
                         </div>
                         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px">
                             <button class="btn btn-ghost" onclick="closeApiConfigModal()">取消</button>
@@ -2014,12 +2550,16 @@
                 <div class="card" style="margin-bottom:20px">
                     <div class="card-head"><h3>🔍 新建搜索任务</h3></div>
                     <div class="card-body">
-                        <div style="display:grid;grid-template-columns:1fr 1fr 200px auto;gap:12px;align-items:end">
+                        <div style="display:grid;grid-template-columns:1fr auto 1fr 200px auto;gap:12px;align-items:end">
                             <div style="position:relative">
                                 <label class="form-label">搜索关键词</label>
                                 <input type="text" class="form-input" id="ls-query" placeholder="如: security camera distributor" autocomplete="off" onfocus="showQueryHistory()" oninput="filterQueryHistory(this.value)">
                                 <div class="autocomplete-dropdown" id="ls-query-dropdown" style="display:none"></div>
                             </div>
+                            <button class="btn btn-sm" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;margin-bottom:1px;white-space:nowrap" onclick="openKeywordAnalyzer()" title="AI 分析并可视化展示相关关键词">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                                AI 分析
+                            </button>
                             <div style="position:relative">
                                 <label class="form-label">目标地区</label>
                                 <input type="text" class="form-input" id="ls-location" placeholder="如: USA, California 或 Germany" autocomplete="off" onfocus="showLocationSuggestions()" oninput="filterLocationSuggestions(this.value)" onblur="setTimeout(()=>hideDropdown('ls-location-dropdown'),200)">
@@ -2055,14 +2595,19 @@
                         </div>
                         <div style="margin-top:16px;padding:16px 20px;background:var(--surface-2);border-radius:var(--radius-sm);display:flex;gap:28px;align-items:center;flex-wrap:wrap;border:1px solid var(--border)">
                             <label class="toggle-switch">
+                                <input type="checkbox" id="ls-keyword-expand" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">🤖 AI 关键词拓展</span>
+                            </label>
+                            <label class="toggle-switch">
                                 <input type="checkbox" id="ls-ai-enrich" checked>
                                 <span class="toggle-slider"></span>
-                                <span class="toggle-label">启用AI智能分析</span>
+                                <span class="toggle-label">AI 智能分析</span>
                             </label>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="ls-website-crawl" checked>
                                 <span class="toggle-slider"></span>
-                                <span class="toggle-label">启用网站深度爬取</span>
+                                <span class="toggle-label">网站深度爬取</span>
                             </label>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="ls-auto-import">
@@ -2449,6 +2994,22 @@
         </div>
     </div>
 
+    <!-- 关键词分析弹窗 -->
+    <div class="modal-overlay" id="modal-keyword-overlay" style="display:none">
+        <div class="modal modal-wide" style="max-width:800px">
+            <div class="modal-head">
+                <h3>🔍 AI 关键词分析</h3>
+                <button class="modal-close" onclick="closeKeywordModal()">✕</button>
+            </div>
+            <div class="modal-body" id="keyword-modal-body">
+                <div style="text-align:center;padding:40px">
+                    <div class="spinner" style="margin:0 auto 16px"></div>
+                    <p style="color:var(--text-3)">AI 正在分析关键词并生成拓展词...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>
 
@@ -2461,6 +3022,10 @@
             opts.headers = opts.headers || {};
             opts.headers['X-Requested-With'] = 'XMLHttpRequest';
             const res = await fetch(API + url, opts);
+            if (res.status === 401) {
+                window.location.href = '/login.html';
+                return null;
+            }
             const data = await res.json();
             if (!data.success) throw new Error(data.error || '请求失败');
             return data.data;
@@ -2469,6 +3034,27 @@
             toast(e.message, 'err');
             return null;
         }
+    }
+
+    // ==================== AUTH ====================
+    async function loadUser() {
+        try {
+            const res = await fetch('/api/me');
+            if (!res.ok) { window.location.href = '/login.html'; return; }
+            const user = await res.json();
+            document.getElementById('user-name').textContent = user.name || user.email;
+            document.getElementById('user-role').textContent = user.role === 'admin' ? '管理员' : '用户';
+            document.getElementById('user-avatar').src = user.avatar || '';
+            if (user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'block';
+            }
+        } catch (e) {
+            window.location.href = '/login.html';
+        }
+    }
+
+    function logout() {
+        fetch('/logout').then(() => { window.location.href = '/login.html'; });
     }
 
     function toast(msg, type = 'info') {
@@ -2506,7 +3092,8 @@
         cooldown: '冷却期监控', materials: '资料管理', 'lead-search': 'AI获客搜索', 'lead-results': '搜索结果详情',
         blacklist: '拉黑公司库',
         'api-configs': 'API 管理',
-        settings: '系统设置'
+        settings: '系统设置',
+        admin: '管理员面板'
     };
 
     let currentPage = 'dashboard';
@@ -2520,14 +3107,56 @@
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         const pageEl = document.getElementById('page-' + page);
         if (pageEl) pageEl.classList.add('active');
-        document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
-        const navLink = document.querySelector(`.nav-link[data-page="${page}"]`);
-        if (navLink) navLink.classList.add('active');
         document.getElementById('page-title').textContent = pageTitles[page] || page;
+
+        // 切换侧边栏导航（admin 页面显示管理员导航，其他显示客户端导航）
+        const isAdmin = page === 'admin';
+        document.getElementById('nav-client').style.display = isAdmin ? 'none' : 'block';
+        document.getElementById('nav-admin').style.display = isAdmin ? 'block' : 'none';
+
+        // 激活对应的 nav-link
+        document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
+        if (isAdmin) {
+            // admin 页面默认高亮第一个 tab
+            const firstAdminNav = document.querySelector('#nav-admin .nav-link[data-admin-tab="overview"]');
+            if (firstAdminNav) firstAdminNav.classList.add('active');
+            // 重置 admin tab 到 overview
+            document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.admin-panel').forEach(p => p.classList.remove('active'));
+            const overviewTab = document.querySelector('.admin-tab[data-tab="overview"]');
+            const overviewPanel = document.getElementById('admin-panel-overview');
+            if (overviewTab) overviewTab.classList.add('active');
+            if (overviewPanel) overviewPanel.classList.add('active');
+            adminLoadedTabs.clear();
+        } else {
+            const navLink = document.querySelector(`#nav-client .nav-link[data-page="${page}"]`);
+            if (navLink) navLink.classList.add('active');
+        }
+
         loadPage(page);
     }
 
-    document.querySelectorAll('.nav-link').forEach(link => {
+    // 管理员导航点击切换
+    function switchAdminNav(tabName) {
+        // 确保在 admin 页面
+        if (currentPage !== 'admin') {
+            navigate('admin');
+        }
+        // 切换 admin tab
+        document.querySelectorAll('#nav-admin .nav-link').forEach(n => n.classList.remove('active'));
+        const navLink = document.querySelector(`#nav-admin .nav-link[data-admin-tab="${tabName}"]`);
+        if (navLink) navLink.classList.add('active');
+        // 同步切换顶部 tab
+        document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.admin-panel').forEach(p => p.classList.remove('active'));
+        const tabEl = document.querySelector(`.admin-tab[data-tab="${tabName}"]`);
+        const panelEl = document.getElementById('admin-panel-' + tabName);
+        if (tabEl) tabEl.classList.add('active');
+        if (panelEl) panelEl.classList.add('active');
+        loadAdminTabData(tabName);
+    }
+
+    document.querySelectorAll('#nav-client .nav-link').forEach(link => {
         link.addEventListener('click', () => navigate(link.dataset.page));
     });
 
@@ -2547,8 +3176,598 @@
             case 'blacklist': loadBlacklist(); break;
             case 'api-configs': loadApiConfigs(); break;
             case 'settings': loadSettings(); break;
+            case 'admin': loadAdminData(); break;
         }
     }
+
+    // ==================== ADMIN ====================
+    let adminCustPage = 1;
+    let adminLoadedTabs = new Set();
+    let adminChartInstances = {};
+    let currentTrendDays = 7;
+
+    // Tab 切换事件
+    document.addEventListener('click', function(e) {
+        const tab = e.target.closest('.admin-tab');
+        if (!tab) return;
+        const tabName = tab.dataset.tab;
+        // 切换 tab 样式
+        document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.admin-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('admin-panel-' + tabName).classList.add('active');
+        // 按需加载
+        loadAdminTabData(tabName);
+    });
+
+    function switchTrendRange(days, btn) {
+        currentTrendDays = days;
+        document.querySelectorAll('.admin-trend-range').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        loadTrendChart(days);
+    }
+
+    async function loadTrendChart(days) {
+        try {
+            const res = await fetch(`/api/admin/stats?trend_days=${days}`);
+            if (!res.ok) return;
+            const s = await res.json();
+            renderAdminCharts(s);
+        } catch(e) {}
+    }
+
+    async function loadAdminTabData(tabName) {
+        if (adminLoadedTabs.has(tabName)) return;
+        adminLoadedTabs.add(tabName);
+        switch(tabName) {
+            case 'overview': await loadAdminOverview(); break;
+            case 'customers': await loadAdminCustomers(); break;
+            case 'sending': await loadAdminSending(); break;
+            case 'leads': await loadAdminLeads(); break;
+            case 'system': await loadAdminSystem(); break;
+        }
+    }
+
+    async function loadAdminData() {
+        // 默认只加载 Tab 1 (overview)
+        adminLoadedTabs.add('overview');
+        await loadAdminOverview();
+    }
+
+    async function loadAdminOverview() {
+        const statsRes = await fetch('/api/admin/stats').then(r => r.ok ? r.json() : null);
+        if (statsRes) {
+            const s = statsRes;
+            // 核心统计
+            document.getElementById('as-cust').textContent = s.total_customers || 0;
+            document.getElementById('as-cust-sub').textContent = `${s.total_countries || 0} 个国家`;
+            document.getElementById('as-email').textContent = s.total_emails || 0;
+            document.getElementById('as-email-sub').textContent = `个人: ${s.personal_emails || 0} / 公共: ${s.public_emails || 0}`;
+            document.getElementById('as-sent').textContent = s.total_sent || 0;
+            const rate = s.total_sent > 0 ? ((s.total_failed || 0) / s.total_sent * 100).toFixed(1) : '0';
+            document.getElementById('as-sent-sub').textContent = `成功率 ${(100 - parseFloat(rate)).toFixed(1)}%`;
+            document.getElementById('as-failed').textContent = s.total_failed || 0;
+            document.getElementById('as-failed-sub').textContent = `退信率 ${rate}%`;
+            document.getElementById('as-today').textContent = s.today_sent || 0;
+            document.getElementById('as-today-sub').textContent = s.today_failed ? `失败 ${s.today_failed}` : '无失败';
+
+            // 次要统计
+            document.getElementById('as-countries').textContent = s.total_countries || 0;
+            document.getElementById('as-contacts').textContent = s.total_contacts || 0;
+            document.getElementById('as-search').textContent = s.total_search_tasks || 0;
+            document.getElementById('as-materials').textContent = s.total_materials || 0;
+
+            // Chart.js 图表
+            renderAdminCharts(s);
+        }
+    }
+
+    async function loadAdminSending() {
+        try {
+            const res = await fetch('/api/admin/send-queue/status');
+            if (!res.ok) return;
+            const data = await res.json();
+            document.getElementById('as-queue-pending').textContent = data.pending || 0;
+            document.getElementById('as-queue-running').textContent = data.running || 0;
+            document.getElementById('as-queue-today').textContent = data.today_sent || 0;
+        } catch(e) {
+            document.getElementById('as-queue-pending').textContent = 'N/A';
+            document.getElementById('as-queue-running').textContent = 'N/A';
+            document.getElementById('as-queue-today').textContent = 'N/A';
+        }
+    }
+
+    async function loadAdminLeads() {
+        try {
+            const [summaryRes, tasksRes] = await Promise.all([
+                fetch('/api/admin/search-tasks/summary').then(r => r.ok ? r.json() : null),
+                fetch('/api/search/tasks?per_page=50').then(r => r.ok ? r.json() : null)
+            ]);
+            if (summaryRes) {
+                document.getElementById('as-search-running').textContent = summaryRes.running || 0;
+                document.getElementById('as-search-completed').textContent = summaryRes.completed || 0;
+                document.getElementById('as-search-failed').textContent = summaryRes.failed || 0;
+            }
+            if (tasksRes && tasksRes.data && tasksRes.data.items) {
+                const tbody = document.getElementById('admin-search-tasks-tbody');
+                const items = tasksRes.data.items;
+                tbody.innerHTML = items.length ? items.map(t => `
+                    <tr>
+                        <td>${esc(t.task_name || t.name || '-')}</td>
+                        <td style="font-size:0.82rem;color:var(--text-2)">${esc(t.keywords || t.query || '-')}</td>
+                        <td><span class="badge ${t.status === 'completed' ? 'badge-info' : t.status === 'running' ? 'badge-warn' : ''}">${t.status === 'running' ? '运行中' : t.status === 'completed' ? '已完成' : t.status === 'failed' ? '失败' : t.status || '-'}</span></td>
+                        <td>${t.found_count || t.results_count || 0}</td>
+                        <td>${t.imported_count || 0}</td>
+                        <td style="font-size:0.78rem;color:var(--text-3)">${t.created_at ? formatDate(t.created_at) : '-'}</td>
+                    </tr>
+                `).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-3)">暂无任务</td></tr>';
+            }
+        } catch(e) {}
+    }
+
+    async function loadAdminSystem() {
+        try {
+            const [healthRes, usersRes] = await Promise.all([
+                fetch('/api/admin/system/health').then(r => r.ok ? r.json() : null),
+                fetch('/api/admin/users').then(r => r.ok ? r.json() : null)
+            ]);
+            if (healthRes) {
+                document.getElementById('as-health-memory').textContent = healthRes.memory_percent || '-';
+                document.getElementById('as-health-memory-sub').textContent = healthRes.memory_used || '';
+                document.getElementById('as-health-disk').textContent = healthRes.disk_percent || '-';
+                document.getElementById('as-health-disk-sub').textContent = healthRes.disk_used || '';
+                document.getElementById('as-health-db').textContent = healthRes.db_size || '-';
+                document.getElementById('as-health-db-sub').textContent = 'SQLite';
+                document.getElementById('as-health-uptime').textContent = healthRes.uptime || '-';
+                document.getElementById('as-health-uptime-sub').textContent = healthRes.uptime_detail || '';
+            }
+            // 用户列表
+            if (usersRes && usersRes.users) {
+                renderAdminUsers(usersRes.users);
+            }
+        } catch(e) {}
+        loadInviteCodes();
+    }
+
+    function renderAdminUsers(users) {
+        const tbody = document.getElementById('admin-users-tbody');
+        tbody.innerHTML = users.map(u => `
+            <tr>
+                <td>${u.id}</td>
+                <td>${esc(u.email)}</td>
+                <td>${esc(u.name || '-')}</td>
+                <td>
+                    <select onchange="toggleUserRole(${u.id}, this.value)" style="font-size:0.78rem;padding:2px 6px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface)">
+                        <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>管理员</option>
+                        <option value="user" ${u.role === 'user' ? 'selected' : ''}>用户</option>
+                    </select>
+                </td>
+                <td>
+                    <button onclick="toggleUserStatus(${u.id}, ${u.is_active ? 0 : 1})" class="btn btn-sm ${u.is_active ? 'btn-ghost' : 'btn-accent'}" style="font-size:0.72rem;padding:3px 10px">
+                        ${u.is_active ? '禁用' : '启用'}
+                    </button>
+                </td>
+                <td>${u.created_at ? formatDate(u.created_at) : '-'}</td>
+                <td>${u.last_login_at ? formatDate(u.last_login_at) : '-'}</td>
+            </tr>
+        `).join('');
+    }
+
+    async function toggleUserRole(userId, newRole) {
+        const res = await fetch(`/api/admin/users/${userId}/role`, {
+            method: 'PUT', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+            body: JSON.stringify({role: newRole})
+        });
+        if (res.ok) { toast('角色已更新', 'ok'); } else { toast('更新失败', 'err'); }
+    }
+
+    async function toggleUserStatus(userId, newStatus) {
+        const res = await fetch(`/api/admin/users/${userId}/status`, {
+            method: 'PUT', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+            body: JSON.stringify({is_active: newStatus})
+        });
+        if (res.ok) { toast(newStatus ? '用户已启用' : '用户已禁用', 'ok'); loadAdminTabData('system'); } else { toast('操作失败', 'err'); }
+    }
+
+    // ==================== Chart.js 图表 ====================
+    function destroyChart(key) {
+        if (adminChartInstances[key]) {
+            adminChartInstances[key].destroy();
+            adminChartInstances[key] = null;
+        }
+    }
+
+    // Chart.js 默认配置
+    const chartColors = {
+        teal: '#2a9d8f',
+        accent: '#e85d4a',
+        blue: '#4a7de4',
+        purple: '#8b6ce8',
+        gold: '#c9943e',
+        text3: '#8a8aa3',
+        border: '#e2e2ea'
+    };
+
+    // 生成渐变色数组（水平柱状图等用）
+    function generateBarColors(count, baseColor, alphaStart, alphaEnd) {
+        const colors = [];
+        for (let i = 0; i < count; i++) {
+            const a = alphaStart + (alphaEnd - alphaStart) * (i / Math.max(1, count - 1));
+            colors.push(hexToRgba(baseColor, a));
+        }
+        return colors;
+    }
+
+    function hexToRgba(hex, alpha) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r},${g},${b},${alpha})`;
+    }
+
+    // 甜甜圈图中心文字插件
+    const centerTextPlugin = {
+        id: 'centerText',
+        afterDraw(chart) {
+            if (!chart.config.options.plugins.centerText) return;
+            const { ctx, chartArea: { left, right, top, bottom } } = chart;
+            const cx = (left + right) / 2;
+            const cy = (top + bottom) / 2;
+            const text = chart.config.options.plugins.centerText.text || '';
+            const subText = chart.config.options.plugins.centerText.subText || '';
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = '700 1.3rem DM Sans';
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillText(text, cx, cy - (subText ? 10 : 0));
+            if (subText) {
+                ctx.font = '400 0.72rem DM Sans';
+                ctx.fillStyle = '#8a8aa3';
+                ctx.fillText(subText, cx, cy + 12);
+            }
+            ctx.restore();
+        }
+    };
+    Chart.register(centerTextPlugin);
+
+    function renderAdminCharts(s) {
+        renderTrendChart(s.daily_trend || []);
+        renderCountryChart((s.country_distribution || []).slice(0, 10).map(i => ({label: i.country, value: i.count})));
+        renderSourceChart((s.contact_sources || []).map(i => ({label: i.source, value: i.count})));
+        renderIndustryChart((s.industry_distribution || []).slice(0, 10).map(i => ({label: i.industry, value: i.count})));
+        renderEmailTypeChart((s.email_type_distribution || []).map(i => ({label: i.type, value: i.count})));
+    }
+
+    function renderTrendChart(data) {
+        destroyChart('trend');
+        const canvas = document.getElementById('admin-trend-chart');
+        if (!canvas || !data.length) return;
+        const ctx = canvas.getContext('2d');
+        const labels = data.map(d => d.date ? d.date.slice(5) : '');
+        adminChartInstances['trend'] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: '成功',
+                        data: data.map(d => d.sent || 0),
+                        backgroundColor: hexToRgba(chartColors.teal, 0.8),
+                        borderColor: chartColors.teal,
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        barPercentage: 0.7,
+                        categoryPercentage: 0.6
+                    },
+                    {
+                        label: '失败',
+                        data: data.map(d => d.failed || 0),
+                        backgroundColor: hexToRgba(chartColors.accent, 0.8),
+                        borderColor: chartColors.accent,
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        barPercentage: 0.7,
+                        categoryPercentage: 0.6
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 600 },
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'top', align: 'end', labels: { boxWidth: 10, padding: 16, font: { size: 11, family: 'DM Sans' }, color: chartColors.text3 } },
+                    tooltip: {
+                        backgroundColor: '#1a1a2e',
+                        titleFont: { size: 12, family: 'DM Sans' },
+                        bodyFont: { size: 12, family: 'DM Sans' },
+                        padding: 10,
+                        cornerRadius: 8,
+                        boxPadding: 4
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { font: { size: 10, family: 'DM Sans' }, color: chartColors.text3 } },
+                    y: { grid: { color: chartColors.border, drawBorder: false }, ticks: { font: { size: 10, family: 'DM Sans' }, color: chartColors.text3 }, beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    function renderCountryChart(items) {
+        destroyChart('country');
+        const canvas = document.getElementById('admin-country-chart');
+        if (!canvas || !items.length) return;
+        const ctx = canvas.getContext('2d');
+        items.reverse(); // Chart.js horizontalBar 从下往上绘制
+        adminChartInstances['country'] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: items.map(i => i.label),
+                datasets: [{
+                    data: items.map(i => i.value),
+                    backgroundColor: generateBarColors(items.length, chartColors.teal, 0.9, 0.4),
+                    borderColor: chartColors.teal,
+                    borderWidth: 0,
+                    borderRadius: 3,
+                    barPercentage: 0.65
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 600 },
+                plugins: { legend: { display: false }, tooltip: { backgroundColor: '#1a1a2e', titleFont: { size: 11, family: 'DM Sans' }, bodyFont: { size: 11, family: 'DM Sans' }, padding: 8, cornerRadius: 6 } },
+                scales: {
+                    x: { grid: { color: chartColors.border, drawBorder: false }, ticks: { font: { size: 10, family: 'DM Sans' }, color: chartColors.text3 }, beginAtZero: true },
+                    y: { grid: { display: false }, ticks: { font: { size: 11, family: 'DM Sans' }, color: '#1a1a2e' } }
+                }
+            }
+        });
+    }
+
+    function renderSourceChart(items) {
+        destroyChart('source');
+        const canvas = document.getElementById('admin-source-chart');
+        if (!canvas || !items.length) return;
+        const ctx = canvas.getContext('2d');
+        const total = items.reduce((s, i) => s + i.value, 0);
+        const palette = [chartColors.blue, chartColors.teal, chartColors.gold, chartColors.accent, chartColors.purple, '#5bbce8', '#e8a84c', '#5be8a8', '#e85ba8', '#a85be8'];
+        adminChartInstances['source'] = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: items.map(i => i.label),
+                datasets: [{
+                    data: items.map(i => i.value),
+                    backgroundColor: items.map((_, idx) => palette[idx % palette.length]),
+                    borderWidth: 2,
+                    borderColor: '#ffffff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '55%',
+                animation: { duration: 600 },
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 10, padding: 10, font: { size: 11, family: 'DM Sans' }, color: chartColors.text3 } },
+                    tooltip: { backgroundColor: '#1a1a2e', titleFont: { size: 11, family: 'DM Sans' }, bodyFont: { size: 11, family: 'DM Sans' }, padding: 8, cornerRadius: 6 },
+                    centerText: { text: String(total), subText: '总计' }
+                }
+            }
+        });
+    }
+
+    function renderIndustryChart(items) {
+        destroyChart('industry');
+        const canvas = document.getElementById('admin-industry-chart');
+        if (!canvas || !items.length) return;
+        const ctx = canvas.getContext('2d');
+        items.reverse();
+        adminChartInstances['industry'] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: items.map(i => i.label),
+                datasets: [{
+                    data: items.map(i => i.value),
+                    backgroundColor: generateBarColors(items.length, chartColors.accent, 0.9, 0.4),
+                    borderColor: chartColors.accent,
+                    borderWidth: 0,
+                    borderRadius: 3,
+                    barPercentage: 0.65
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 600 },
+                plugins: { legend: { display: false }, tooltip: { backgroundColor: '#1a1a2e', titleFont: { size: 11, family: 'DM Sans' }, bodyFont: { size: 11, family: 'DM Sans' }, padding: 8, cornerRadius: 6 } },
+                scales: {
+                    x: { grid: { color: chartColors.border, drawBorder: false }, ticks: { font: { size: 10, family: 'DM Sans' }, color: chartColors.text3 }, beginAtZero: true },
+                    y: { grid: { display: false }, ticks: { font: { size: 10, family: 'DM Sans' }, color: '#1a1a2e' } }
+                }
+            }
+        });
+    }
+
+    function renderEmailTypeChart(items) {
+        destroyChart('emailType');
+        const canvas = document.getElementById('admin-email-type-chart');
+        if (!canvas || !items.length) return;
+        const ctx = canvas.getContext('2d');
+        const palette = [chartColors.purple, chartColors.blue, chartColors.teal, chartColors.gold, chartColors.accent, '#5bbce8', '#e8a84c', '#5be8a8'];
+        adminChartInstances['emailType'] = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: items.map(i => i.label),
+                datasets: [{
+                    data: items.map(i => i.value),
+                    backgroundColor: items.map((_, idx) => palette[idx % palette.length]),
+                    borderWidth: 2,
+                    borderColor: '#ffffff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 600 },
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 10, padding: 10, font: { size: 11, family: 'DM Sans' }, color: chartColors.text3 } },
+                    tooltip: { backgroundColor: '#1a1a2e', titleFont: { size: 11, family: 'DM Sans' }, bodyFont: { size: 11, family: 'DM Sans' }, padding: 8, cornerRadius: 6 }
+                }
+            }
+        });
+    }
+
+    async function loadAdminCustomers() {
+        const search = document.getElementById('admin-cust-search').value;
+        const country = document.getElementById('admin-cust-country').value;
+        const sort = document.getElementById('admin-cust-sort').value;
+        const url = `/api/admin/customers?page=${adminCustPage}&per_page=15&search=${encodeURIComponent(search)}&country=${encodeURIComponent(country)}&sort=${sort}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // 填充国家下拉
+        const countrySel = document.getElementById('admin-cust-country');
+        const currentVal = countrySel.value;
+        const existingOpts = new Set([...countrySel.options].map(o => o.value));
+        if (data.countries) {
+            data.countries.forEach(c => {
+                if (!existingOpts.has(c)) {
+                    const opt = document.createElement('option');
+                    opt.value = c; opt.textContent = c;
+                    countrySel.appendChild(opt);
+                }
+            });
+        }
+        countrySel.value = currentVal;
+
+        // 渲染表格
+        const tbody = document.getElementById('admin-cust-tbody');
+        tbody.innerHTML = data.customers.map(c => `
+            <tr>
+                <td><a href="#" onclick="loadAdminCustomerDetail(${c.id});return false" style="color:var(--blue);font-weight:600;text-decoration:none">${esc(c.name)}</a></td>
+                <td>${c.country ? `<span class="badge" style="font-size:0.7rem">${esc(c.country)}</span>` : '-'}</td>
+                <td style="font-size:0.78rem;color:var(--text-2)">${esc(c.industry || '-')}</td>
+                <td><span style="color:var(--blue);font-weight:600">${c.email_count}</span></td>
+                <td>${c.contact_count}</td>
+                <td><span style="color:var(--teal);font-weight:600">${c.sent_count}</span></td>
+                <td>${c.failed_count > 0 ? `<span style="color:#e74c3c;font-weight:600">${c.failed_count}</span>` : '0'}</td>
+                <td style="font-size:0.78rem;color:var(--text-3)">${c.last_sent ? formatDate(c.last_sent) : '-'}</td>
+                <td style="font-size:0.78rem;color:var(--text-3)">${c.created_at ? formatDate(c.created_at) : '-'}</td>
+                <td><button class="btn btn-ghost btn-sm" onclick="loadAdminCustomerDetail(${c.id})">详情</button></td>
+            </tr>
+        `).join('');
+
+        // 分页信息
+        const total = data.total;
+        const perPage = data.per_page;
+        const totalPages = Math.ceil(total / perPage);
+        document.getElementById('admin-cust-info').textContent = `共 ${total} 个客户，第 ${data.page}/${totalPages} 页`;
+
+        const pag = document.getElementById('admin-cust-pagination');
+        pag.innerHTML = '';
+        for (let i = 1; i <= totalPages; i++) {
+            const btn = document.createElement('button');
+            btn.className = `btn btn-sm ${i === data.page ? 'btn-accent' : 'btn-ghost'}`;
+            btn.textContent = i;
+            btn.onclick = () => { adminCustPage = i; loadAdminCustomers(); };
+            if (totalPages > 7 && i > 3 && i < totalPages - 1 && Math.abs(i - data.page) > 1) {
+                if (i === 4 || i === totalPages - 2) {
+                    btn.textContent = '...';
+                    btn.disabled = true;
+                } else continue;
+            }
+            pag.appendChild(btn);
+        }
+    }
+
+    async function loadAdminCustomerDetail(customerId) {
+        const res = await fetch(`/api/admin/customer/${customerId}`);
+        if (!res.ok) { toast('加载失败', 'err'); return; }
+        const c = await res.json();
+
+        const sentTotal = (c.send_summary && c.send_summary.sent) || 0;
+        const failedTotal = (c.send_summary && c.send_summary.failed) || 0;
+        const rate = sentTotal > 0 ? ((failedTotal / sentTotal) * 100).toFixed(1) : '0';
+
+        let html = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+            <div>
+                <div style="font-size:1.1rem;font-weight:700;margin-bottom:8px">${esc(c.name)}</div>
+                ${c.country ? `<span class="badge badge-warn" style="margin-right:6px">${esc(c.country)}</span>` : ''}
+                ${c.industry ? `<span class="badge badge-info">${esc(c.industry)}</span>` : ''}
+                ${c.website ? `<div style="margin-top:8px"><a href="${c.website.startsWith('http') ? esc(c.website) : 'https://' + esc(c.website)}" target="_blank" style="color:var(--blue);font-size:0.82rem">${esc(c.website)}</a></div>` : ''}
+                ${c.address ? `<div style="margin-top:4px;font-size:0.82rem;color:var(--text-2)">${esc(c.address)}</div>` : ''}
+                <div style="margin-top:4px;font-size:0.78rem;color:var(--text-3)">创建于 ${c.created_at ? formatDate(c.created_at) : '-'}</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
+                <div style="background:var(--surface-2);padding:12px;border-radius:8px;text-align:center">
+                    <div style="font-size:0.72rem;color:var(--text-3);margin-bottom:4px">邮箱数</div>
+                    <div style="font-size:1.3rem;font-weight:700;color:var(--blue)">${c.emails ? c.emails.length : 0}</div>
+                </div>
+                <div style="background:var(--surface-2);padding:12px;border-radius:8px;text-align:center">
+                    <div style="font-size:0.72rem;color:var(--text-3);margin-bottom:4px">联系人</div>
+                    <div style="font-size:1.3rem;font-weight:700;color:var(--purple)">${c.contacts ? c.contacts.length : 0}</div>
+                </div>
+                <div style="background:var(--surface-2);padding:12px;border-radius:8px;text-align:center">
+                    <div style="font-size:0.72rem;color:var(--text-3);margin-bottom:4px">已发送</div>
+                    <div style="font-size:1.3rem;font-weight:700;color:var(--teal)">${sentTotal}</div>
+                </div>
+                <div style="background:var(--surface-2);padding:12px;border-radius:8px;text-align:center">
+                    <div style="font-size:0.72rem;color:var(--text-3);margin-bottom:4px">失败/退信率</div>
+                    <div style="font-size:1.3rem;font-weight:700;color:#e74c3c">${rate}%</div>
+                </div>
+            </div>
+        </div>
+
+        ${c.company_info ? `<div class="detail-section"><h4>公司简介</h4><p style="font-size:0.85rem;color:var(--text-2);line-height:1.7;white-space:pre-wrap">${esc(c.company_info)}</p></div>` : ''}
+
+        <div class="detail-section"><h4>📧 邮箱列表 (${c.emails ? c.emails.length : 0})</h4>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+                ${(c.emails || []).map(e => `<span class="badge ${e.active ? 'badge-info' : ''}" style="${!e.active ? 'opacity:0.5;text-decoration:line-through' : ''}">${esc(e.address)} <span style="opacity:0.6;font-size:0.68rem">${e.type === 'personal' ? '个人' : '公共'}</span></span>`).join('') || '<span style="color:var(--text-3);font-size:0.82rem">无邮箱</span>'}
+            </div>
+        </div>
+
+        <div class="detail-section"><h4>👤 联系人 (${c.contacts ? c.contacts.length : 0})</h4>
+            ${(c.contacts || []).map(ct => `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:0.85rem;display:flex;gap:16px"><span style="font-weight:600">${esc(ct.name || '-')}</span><span style="color:var(--text-2)">${esc(ct.job || '-')}</span><span class="badge" style="font-size:0.68rem">${ct.source || '-'}</span></div>`).join('') || '<div style="color:var(--text-3);font-size:0.82rem;padding:8px 0">无联系人</div>'}
+        </div>
+
+        <div class="detail-section"><h4>📨 发送记录 (${c.email_logs ? c.email_logs.length : 0})</h4>
+            <table class="data-table" style="margin-top:8px">
+                <thead><tr><th>主题</th><th>状态</th><th>来源</th><th>发送时间</th></tr></thead>
+                <tbody>
+                    ${(c.email_logs || []).map(l => `<tr>
+                        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.subject || '')}">${esc(l.subject || '-')}</td>
+                        <td>${l.status === 'sent' ? '<span style="color:#2e7d32">成功</span>' : '<span style="color:#c62828">失败</span>'}</td>
+                        <td><span class="badge" style="font-size:0.68rem">${l.source === 'manual' ? '手动' : l.source === 'scheduler' ? '调度器' : l.source || '-'}</span></td>
+                        <td style="font-size:0.78rem;color:var(--text-3)">${l.sent_at ? formatDate(l.sent_at) : '-'}</td>
+                    </tr>`).join('') || '<tr><td colspan="4" style="color:var(--text-3);text-align:center;padding:16px">无发送记录</td></tr>'}
+                </tbody>
+            </table>
+        </div>
+        `;
+
+        openModal('客户详情', html);
+    }
+
+    // 管理员搜索和筛选事件
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchInput = document.getElementById('admin-cust-search');
+        const countrySel = document.getElementById('admin-cust-country');
+        const sortSel = document.getElementById('admin-cust-sort');
+        if (searchInput) {
+            let timer;
+            searchInput.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { adminCustPage = 1; loadAdminCustomers(); }, 400); });
+        }
+        if (countrySel) countrySel.addEventListener('change', () => { adminCustPage = 1; loadAdminCustomers(); });
+        if (sortSel) sortSel.addEventListener('change', () => { adminCustPage = 1; loadAdminCustomers(); });
+    });
 
     // ==================== DASHBOARD ====================
     async function loadDashboard() {
@@ -2689,17 +3908,31 @@
     let materialPage = 1;
     const MATERIAL_TYPE_LABELS = {
         'advantage': '优势', 'brochure': '宣传册', 'case_study': '案例',
-        'storage': '储能', 'rule': '规则', 'company_intro': '公司简介', 'custom': '自定义'
+        'storage': '储能', 'rule': '规则', 'company_intro': '公司简介',
+        'personal_info': '个人信息', 'custom': '自定义'
+    };
+
+    // 资料分区映射
+    const MATERIAL_ZONES = {
+        'personal': ['personal_info'],
+        'company': ['company_intro'],
+        'product': ['advantage', 'brochure', 'case_study', 'storage', 'rule']
+    };
+    const ZONE_CONFIG = {
+        'personal': { title: '👤 个人信息', icon: '👤', desc: '发件人自我介绍、职位信息等', color: '#4a7de4' },
+        'company': { title: '🏢 公司简介', icon: '🏢', desc: '公司背景、主营业务、核心优势', color: '#c9943e' },
+        'product': { title: '📦 产品资料', icon: '📦', desc: '产品优势、案例、宣传册、储能方案', color: '#2e7d32' }
     };
     const SCOPE_LABELS = {
         'all': '全部', 'small_power': '小功率', 'large_power': '大功率', 'specific': '特定'
     };
 
     async function loadMaterials(page = 1) {
+        loadSenderInfoCard();
         materialPage = page;
         const search = document.getElementById('material-search').value;
         const type = document.getElementById('material-filter-type').value;
-        const params = new URLSearchParams({ page, per_page: 20 });
+        const params = new URLSearchParams({ page, per_page: 100 });
         if (search) params.set('search', search);
         if (type) params.set('type', type);
 
@@ -2713,44 +3946,37 @@
             document.getElementById('material-stats').innerHTML = `
                 <div class="stat-card"><div class="label">资料总数</div><div class="value c-accent">${stats.total}</div></div>
                 <div class="stat-card"><div class="label">已启用</div><div class="value c-teal">${stats.active}</div></div>
-                <div class="stat-card"><div class="label">优势</div><div class="value c-blue">${tc.advantage || 0}</div></div>
-                <div class="stat-card"><div class="label">案例</div><div class="value c-gold">${tc.case_study || 0}</div></div>
-                <div class="stat-card"><div class="label">宣传册</div><div class="value c-purple">${tc.brochure || 0}</div></div>
+                <div class="stat-card"><div class="label">个人信息</div><div class="value c-blue">${tc.personal_info || 0}</div></div>
+                <div class="stat-card"><div class="label">公司简介</div><div class="value c-gold">${tc.company_intro || 0}</div></div>
+                <div class="stat-card"><div class="label">产品资料</div><div class="value c-purple">${(tc.advantage||0)+(tc.brochure||0)+(tc.case_study||0)+(tc.storage||0)+(tc.rule||0)}</div></div>
             `;
         }
 
-        // 渲染表格
-        const tbody = document.getElementById('materials-table-body');
-        if (data.materials.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="empty"><div class="title">暂无资料</div></td></tr>';
-        } else {
-            tbody.innerHTML = data.materials.map(m => `
-                <tr>
-                    <td><span class="cell-name">${esc(m.name)}</span><br><span class="cell-muted">${esc(m.material_key)}</span></td>
-                    <td><span class="badge badge-info">${MATERIAL_TYPE_LABELS[m.material_type] || m.material_type}</span></td>
-                    <td>${esc(m.category || '-')}</td>
-                    <td>${SCOPE_LABELS[m.scope] || m.scope || '-'}</td>
-                    <td>${esc(m.track || '-')}</td>
-                    <td>${m.priority}</td>
-                    <td><span class="badge ${m.is_active ? 'badge-ok' : 'badge-err'}">${m.is_active ? '启用' : '禁用'}</span></td>
-                    <td style="text-align:right">
-                        <button class="btn btn-ghost btn-sm" onclick="editMaterial(${m.id})">编辑</button>
-                        <button class="btn btn-ghost btn-sm" onclick="deleteMaterial(${m.id})" style="color:var(--accent)">删除</button>
-                    </td>
-                </tr>
-            `).join('');
-        }
-
-        // 渲染分页
-        const pg = document.getElementById('materials-pagination');
-        if (data.total_pages > 1) {
-            let html = '';
-            for (let i = 1; i <= data.total_pages; i++) {
-                html += `<button class="btn btn-sm ${i === page ? 'btn-accent' : 'btn-ghost'}" onclick="loadMaterials(${i})">${i}</button>`;
+        // 按 zone 分组
+        const zones = { personal: [], company: [], product: [] };
+        data.materials.forEach(m => {
+            for (const [zone, types] of Object.entries(MATERIAL_ZONES)) {
+                if (types.includes(m.material_type)) {
+                    zones[zone].push(m);
+                    break;
+                }
             }
-            pg.innerHTML = html;
-        } else {
-            pg.innerHTML = '';
+        });
+
+        // 渲染每个 zone 的卡片
+        for (const [zone, materials] of Object.entries(zones)) {
+            const container = document.getElementById('material-grid-' + zone);
+            if (!container) continue;
+            if (materials.length === 0) {
+                container.innerHTML = `
+                    <div class="cell-muted" style="text-align:center;padding:40px 20px;border:2px dashed var(--border);border-radius:12px;grid-column:1/-1">
+                        <div style="font-size:2rem;margin-bottom:8px">${ZONE_CONFIG[zone].icon}</div>
+                        <div style="font-size:0.85rem;color:var(--text-2)">暂无${ZONE_CONFIG[zone].title.replace(/[^\u4e00-\u9fa5]/g,'')}资料</div>
+                        <div style="font-size:0.75rem;color:var(--text-3);margin-top:4px">点击右上角 + 添加按钮创建</div>
+                    </div>`;
+            } else {
+                container.innerHTML = materials.map(m => renderMaterialCard(m)).join('');
+            }
         }
 
         // 填充类型筛选下拉框
@@ -2768,8 +3994,197 @@
         }
     }
 
+    function renderMaterialCard(m) {
+        const zoneColor = ZONE_CONFIG[Object.entries(MATERIAL_ZONES).find(([z,types])=>types.includes(m.material_type))?.[0]]?.color || '#999';
+        const contentPreview = m.content_summary ? m.content_summary.substring(0, 60) + (m.content_summary.length > 60 ? '...' : '') : '-';
+        
+        // sender_info 类型使用名片样式
+        if (m.material_type === 'sender_info') {
+            const content = m.content_json || {};
+            return `
+                <div class="material-card" style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px;transition:all .2s;position:relative;overflow:hidden">
+                    <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${zoneColor};opacity:0.6"></div>
+                    <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
+                        <div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#4a7de4,#667eea);display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.2rem;font-weight:600">${esc(content.sender_name?.charAt(0) || 'S')}</div>
+                        <div style="min-width:0;flex:1">
+                            <div style="font-size:0.9rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(m.name)}">${esc(content.sender_name || m.name)}</div>
+                            <div style="font-size:0.75rem;color:var(--text-3);margin-top:2px">${esc(content.job_title || '')}</div>
+                            <div style="font-size:0.72rem;color:var(--text-2);margin-top:2px">${esc(content.company_name || '')}</div>
+                        </div>
+                        <span class="badge ${m.is_active ? 'badge-ok' : 'badge-err'}" style="flex-shrink:0;margin-left:8px;font-size:0.7rem">${m.is_active ? '启用' : '禁用'}</span>
+                    </div>
+                    <div style="font-size:0.75rem;color:var(--text-2);line-height:1.5;margin-top:10px;padding:8px;background:var(--bg);border-radius:8px;white-space:pre-line;max-height:60px;overflow:hidden">${esc(content.signature || contentPreview)}</div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border-light);padding-top:10px;margin-top:10px">
+                        <span style="font-size:0.72rem;color:var(--text-3)">${m.user_id ? '个人' : '系统'}</span>
+                        <div style="display:flex;gap:6px">
+                            <button class="btn btn-ghost btn-sm" style="font-size:0.72rem;padding:4px 10px" onclick="editMaterial(${m.id})">编辑</button>
+                            <button class="btn btn-ghost btn-sm" style="font-size:0.72rem;padding:4px 10px;color:var(--accent)" onclick="deleteMaterial(${m.id})">删除</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        return `
+            <div class="material-card" style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px;transition:all .2s;position:relative;overflow:hidden">
+                <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${zoneColor};opacity:0.6"></div>
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;margin-top:4px">
+                    <div style="min-width:0;flex:1">
+                        <div style="font-size:0.9rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(m.name)}">${esc(m.name)}</div>
+                        <div style="font-size:0.72rem;color:var(--text-3);margin-top:2px">${esc(m.material_key)}</div>
+                    </div>
+                    <span class="badge ${m.is_active ? 'badge-ok' : 'badge-err'}" style="flex-shrink:0;margin-left:8px;font-size:0.7rem">${m.is_active ? '启用' : '禁用'}</span>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+                    <span class="badge badge-info" style="font-size:0.7rem">${MATERIAL_TYPE_LABELS[m.material_type] || m.material_type}</span>
+                    ${m.category ? `<span class="badge" style="font-size:0.7rem;background:var(--bg);color:var(--text-2)">${esc(m.category)}</span>` : ''}
+                    ${m.track ? `<span class="badge" style="font-size:0.7rem;background:var(--bg);color:var(--text-2)">${esc(m.track)}</span>` : ''}
+                </div>
+                <div style="font-size:0.78rem;color:var(--text-2);line-height:1.5;margin-bottom:12px;min-height:36px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(contentPreview)}</div>
+                <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border-light);padding-top:10px">
+                    <span style="font-size:0.72rem;color:var(--text-3)">优先级: ${m.priority}</span>
+                    <div style="display:flex;gap:6px">
+                        <button class="btn btn-ghost btn-sm" style="font-size:0.72rem;padding:4px 10px" onclick="editMaterial(${m.id})">编辑</button>
+                        <button class="btn btn-ghost btn-sm" style="font-size:0.72rem;padding:4px 10px;color:var(--accent)" onclick="deleteMaterial(${m.id})">删除</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    async function loadSenderInfoCard() {
+        try {
+            const data = await api('/api/materials/sender-info');
+            const container = document.getElementById('sender-info-card-body');
+            if (!data || !data.data) {
+                container.innerHTML = '<div style="color:var(--text-3)">未配置发信人信息</div>';
+                return;
+            }
+            const s = data.data;
+            container.innerHTML = `
+                <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+                    <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#4a7de4,#667eea);display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.4rem;font-weight:600">${esc(s.sender_name?.charAt(0) || 'S')}</div>
+                    <div>
+                        <div style="font-size:1rem;font-weight:600">${esc(s.sender_name || '-')}</div>
+                        <div style="font-size:0.82rem;color:var(--text-2);margin-top:2px">${esc(s.job_title || '')} · ${esc(s.company_name || '')}</div>
+                        <div style="font-size:0.78rem;color:var(--text-3);margin-top:2px">${esc(s.sender_email || '')}</div>
+                    </div>
+                    <div style="flex:1;min-width:200px;padding:10px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border);font-size:0.82rem;color:var(--text-2);white-space:pre-line;line-height:1.6">${esc(s.signature || '')}</div>
+                </div>
+            `;
+        } catch (e) {
+            console.error('加载发信人信息失败', e);
+        }
+    }
+
+    function openSenderInfoModal() {
+        let overlay = document.getElementById('modal-sender-info-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'modal-sender-info-overlay';
+            overlay.className = 'modal-overlay';
+            overlay.innerHTML = `
+                <div class="modal" style="max-width:560px;max-height:90vh;overflow-y:auto">
+                    <div class="modal-head">
+                        <h3>📝 编辑发信人信息</h3>
+                        <button class="modal-close" onclick="closeSenderInfoModal()">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                            <div class="form-group">
+                                <label class="form-label">发信人姓名 <span style="color:var(--danger)">*</span></label>
+                                <input type="text" class="form-input" id="si-name" placeholder="如: Travis">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">职位</label>
+                                <input type="text" class="form-input" id="si-title" placeholder="如: Business Development Manager">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">公司名称</label>
+                                <input type="text" class="form-input" id="si-company" placeholder="如: Niteo Solar">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">公司网站</label>
+                                <input type="text" class="form-input" id="si-website" placeholder="如: https://niteosolar.com">
+                            </div>
+                            <div class="form-group" style="grid-column:1 / -1">
+                                <label class="form-label">发信人邮箱</label>
+                                <input type="text" class="form-input" id="si-email" placeholder="如: travis@niteosolar.com">
+                            </div>
+                            <div class="form-group" style="grid-column:1 / -1">
+                                <label class="form-label">邮件签名</label>
+                                <textarea class="form-input" id="si-signature" rows="4" placeholder="邮件末尾的签名内容..."></textarea>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+                            <button class="btn" onclick="closeSenderInfoModal()">取消</button>
+                            <button class="btn btn-accent" onclick="saveSenderInfo()">保存</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+        // 加载现有数据
+        api('/api/materials/sender-info').then(data => {
+            if (data && data.data) {
+                const s = data.data;
+                document.getElementById('si-name').value = s.sender_name || '';
+                document.getElementById('si-title').value = s.job_title || '';
+                document.getElementById('si-company').value = s.company_name || '';
+                document.getElementById('si-website').value = s.company_website || '';
+                document.getElementById('si-email').value = s.sender_email || '';
+                document.getElementById('si-signature').value = s.signature || '';
+            }
+        });
+        overlay.style.display = 'flex';
+    }
+
+    function closeSenderInfoModal() {
+        const overlay = document.getElementById('modal-sender-info-overlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    async function saveSenderInfo() {
+        const payload = {
+            sender_name: document.getElementById('si-name').value.trim(),
+            job_title: document.getElementById('si-title').value.trim(),
+            company_name: document.getElementById('si-company').value.trim(),
+            company_website: document.getElementById('si-website').value.trim(),
+            sender_email: document.getElementById('si-email').value.trim(),
+            signature: document.getElementById('si-signature').value.trim()
+        };
+        if (!payload.sender_name) {
+            toast('发信人姓名不能为空', 'err');
+            return;
+        }
+        try {
+            const res = await api('/api/materials/sender-info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res && res.success) {
+                toast('发信人信息保存成功');
+                closeSenderInfoModal();
+                loadSenderInfoCard();
+            } else {
+                toast(res.error || '保存失败', 'err');
+            }
+        } catch (e) {
+            toast('保存失败', 'err');
+        }
+    }
+
     // ========== 可视化编辑器字段定义 ==========
     const MATERIAL_FIELD_SCHEMAS = {
+        personal_info: [
+            { key: 'name', label: '姓名', type: 'text', placeholder: '如: Travis' },
+            { key: 'title', label: '职位', type: 'text', placeholder: '如: Business Development Manager' },
+            { key: 'company', label: '所属公司', type: 'text', placeholder: '如: Niteo Solar' },
+            { key: 'intro', label: '自我介绍', type: 'textarea', placeholder: '用于邮件开头的自我介绍文案...' },
+            { key: 'contact', label: '联系方式', type: 'text', placeholder: '邮箱或电话（可选）' }
+        ],
         advantage: [
             { key: 'name', label: '优势名称', type: 'text', placeholder: '如: Core Technology: High-Performance Cell' },
             { key: 'tech_features', label: '技术特征', type: 'textarea', placeholder: '描述核心技术特点...' },
@@ -2932,12 +4347,12 @@
         return result;
     }
 
-    function openMaterialModal() {
+    function openMaterialModal(defaultType) {
         document.getElementById('material-edit-id').value = '';
         document.getElementById('material-modal-title').textContent = '添加资料';
         document.getElementById('mat-key').value = '';
         document.getElementById('mat-name').value = '';
-        document.getElementById('mat-type').value = 'advantage';
+        document.getElementById('mat-type').value = defaultType || 'advantage';
         document.getElementById('mat-category').value = '';
         document.getElementById('mat-scope').value = 'all';
         document.getElementById('mat-track').value = '';
@@ -2947,7 +4362,7 @@
         document.getElementById('mat-content').value = '';
         document.getElementById('mat-tags').value = '';
         document.getElementById('mat-active').checked = true;
-        renderVisualEditor('advantage', {});
+        renderVisualEditor(defaultType || 'advantage', {});
         document.getElementById('modal-material-overlay').style.display = 'flex';
     }
 
@@ -3447,7 +4862,7 @@
             body: JSON.stringify(customer)
         });
 
-        if (result && result.success) {
+        if (result && result.customer_id) {
             toast('AI 识别结果导入成功', 'ok');
             clearAIExtractResult();
             clearAIExtractText();
@@ -3610,6 +5025,12 @@
                             closeImportResultModal();
                             navigate('customers');
                         }, 3000);
+                    } else {
+                        // 结果获取失败，但至少关闭模态框并刷新列表
+                        toast('导入已完成，结果展示失败', 'warn');
+                        clearAIBatchFile();
+                        closeImportModal();
+                        loadCustomers(1);
                     }
                     localStorage.removeItem('currentImportTaskId');
                 } else if (taskData.status === 'failed') {
@@ -3641,7 +5062,16 @@
                 const resultData = await api(`/api/import/result/${savedTaskId}`);
                 if (resultData) {
                     showImportResult(resultData);
+                } else {
+                    toast('导入已完成', 'ok');
+                    loadCustomers(1);
                 }
+                localStorage.removeItem('currentImportTaskId');
+            } else if (taskData && taskData.status === 'failed') {
+                toast('导入失败: ' + (taskData.error || '未知错误'), 'err');
+                localStorage.removeItem('currentImportTaskId');
+            } else {
+                // 任务不存在或状态异常，清理本地记录
                 localStorage.removeItem('currentImportTaskId');
             }
         } catch (e) {
@@ -3652,6 +5082,20 @@
     async function aiBatchAnalyzeImport() {
         if (!aiBatchFile) {
             toast('请先选择文件', 'err');
+            return;
+        }
+
+        // 验证文件类型
+        const validExts = ['.xlsx', '.xls', '.csv'];
+        const ext = aiBatchFile.name.substring(aiBatchFile.name.lastIndexOf('.')).toLowerCase();
+        if (!validExts.includes(ext)) {
+            toast(`不支持的文件格式: ${ext}，请上传 Excel (.xlsx/.xls) 或 CSV 文件`, 'err');
+            return;
+        }
+
+        // 验证文件大小（最大16MB）
+        if (aiBatchFile.size > 16 * 1024 * 1024) {
+            toast('文件大小超过16MB限制', 'err');
             return;
         }
 
@@ -3668,16 +5112,29 @@
             const formData = new FormData();
             formData.append('file', aiBatchFile);
 
-            const result = await api('/api/ai/batch-analyze-import', {
+            // 直接使用 fetch，不用 api() 封装，以便获取详细错误
+            const res = await fetch('/api/ai/batch-analyze-import', {
                 method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 body: formData
             });
 
-            if (result && result.task_id) {
+            if (res.status === 401) {
+                window.location.href = '/login.html';
+                return;
+            }
+
+            const data = await res.json();
+
+            if (data.success && data.data && data.data.task_id) {
                 toast('导入任务已启动', 'info');
-                startImportPolling(result.task_id);
+                startImportPolling(data.data.task_id);
+            } else if (data.success && data.task_id) {
+                toast('导入任务已启动', 'info');
+                startImportPolling(data.task_id);
             } else {
-                toast(result?.message || '导入失败', 'err');
+                const errMsg = data.error || data.message || '导入失败，请检查文件格式是否正确';
+                toast(errMsg, 'err');
                 btn.disabled = false;
                 btnText.textContent = '🚀 一键导入';
                 showImportProgress(false);
@@ -3928,6 +5385,8 @@
 
     // Drag & drop events
     document.addEventListener('DOMContentLoaded', async function() {
+        // 加载当前用户信息
+        await loadUser();
         // 恢复发送任务进度
         await recoverSendProgress();
         // 恢复导入任务进度
@@ -4453,6 +5912,7 @@
     // ==================== SEND MODULE ====================
     let selectedCustomerId = null;
     let selectedEmails = [];
+    let selectedMaterialIds = [];
 
     async function loadCountries() {
         const data = await api('/api/countries');
@@ -4532,6 +5992,9 @@
 
         // 默认全选
         toggleEmailGroup('all');
+
+        // 加载资料选择器
+        loadSendPageMaterials();
     }
 
     function renderEmailCheckboxes(emails) {
@@ -4603,6 +6066,61 @@
         const hours = Math.floor(seconds / 3600);
         const mins = Math.floor((seconds % 3600) / 60);
         return hours + ' 小时 ' + mins + ' 分';
+    }
+
+    async function loadSendPageMaterials() {
+        const data = await api('/api/materials/selector');
+        const container = document.getElementById('send-material-list');
+        const empty = document.getElementById('send-material-empty');
+        if (!data || !data.data || data.data.length === 0) {
+            container.style.display = 'none';
+            empty.style.display = 'block';
+            empty.textContent = '暂无可用资料';
+            return;
+        }
+        empty.style.display = 'none';
+        container.style.display = 'block';
+
+        const groups = {};
+        data.data.forEach(m => {
+            if (!groups[m.material_type]) groups[m.material_type] = [];
+            groups[m.material_type].push(m);
+        });
+
+        container.innerHTML = Object.entries(groups).map(([type, items]) => `
+            <div style="margin-bottom:10px">
+                <div style="font-size:0.75rem;color:var(--text-3);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">${MATERIAL_TYPE_LABELS[type] || type}</div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                    ${items.map(m => `
+                        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--surface);border:1.5px solid var(--border);cursor:pointer;transition:all .15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+                            <input type="checkbox" value="${m.id}" onchange="toggleSendMaterial(${m.id}, '${esc(m.name)}')" ${selectedMaterialIds.includes(m.id) ? 'checked' : ''}>
+                            <div style="flex:1;min-width:0">
+                                <div style="font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}</div>
+                                <div style="font-size:0.72rem;color:var(--text-3);margin-top:1px">${esc(m.summary || '').substring(0,40)}${(m.summary||'').length>40?'...':''}</div>
+                            </div>
+                        </label>
+                    `).join('')}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function toggleSendMaterial(id, name) {
+        const idx = selectedMaterialIds.indexOf(id);
+        if (idx > -1) {
+            selectedMaterialIds.splice(idx, 1);
+        } else {
+            selectedMaterialIds.push(id);
+        }
+        // 更新标签展示
+        const tagContainer = document.getElementById('send-selected-material-tags');
+        tagContainer.innerHTML = selectedMaterialIds.map(mid => {
+            const label = name || ('ID:' + mid);
+            return `<span class="badge badge-info" style="display:flex;align-items:center;gap:4px;padding:4px 10px;font-size:0.78rem">${label} <button onclick="toggleSendMaterial(${mid}, '${esc(label)}')" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font-size:0.9rem;line-height:1">×</button></span>`;
+        }).join('');
+        // 更新状态文本
+        const statusEl = document.getElementById('material-selector-status');
+        statusEl.textContent = selectedMaterialIds.length > 0 ? `已选 ${selectedMaterialIds.length} 项` : '未选择';
     }
 
     function formatETA(isoString) {
@@ -5002,7 +6520,7 @@
         const res = await api('/api/email/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ customer_id: selectedCustomerId, target_word_count: targetWordCount })
+            body: JSON.stringify({ customer_id: selectedCustomerId, target_word_count: targetWordCount, selected_material_ids: selectedMaterialIds })
         });
 
         if (!res || !res.task_id) {
@@ -5181,6 +6699,7 @@
                 customer_id: selectedCustomerId,
                 email_addresses: selectedEmails.map(e => e.address),
                 target_word_count: targetWordCount,
+                selected_material_ids: selectedMaterialIds,
                 ...sendConfig
             })
         });
@@ -5262,7 +6781,8 @@
                 body: JSON.stringify({
                     task_type: 'batch',
                     email_ids: emailIds,
-                    send_config: sendConfig
+                    send_config: sendConfig,
+                    selected_material_ids: selectedMaterialIds
                 })
             });
             if (data && data.task_id) {
@@ -5849,6 +7369,66 @@
             ['发送间隔', (currentSchedulerConfig.send_interval || 120) + ' 秒'],
             ['冷却期天数', (currentSchedulerConfig.cooldown_days || 7) + ' 天']
         ].map(([k,v]) => `<div class="info-row"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('');
+
+        // 加载邮件规范
+        loadEmailGuidelines();
+    }
+
+    let currentEmailGuidelines = { content: '', is_active: true };
+
+    async function loadEmailGuidelines() {
+        const data = await api('/api/email-guidelines');
+        if (data && data.content) {
+            currentEmailGuidelines = data;
+            const lines = data.content.split('\n').filter(l => l.trim());
+            const preview = lines.slice(0, 4).map(l => l.substring(0, 40) + (l.length > 40 ? '...' : '')).join('<br>');
+            document.getElementById('settings-guidelines').innerHTML = `
+                <div class="info-row"><span class="k">状态</span><span class="v" style="color:${data.is_active ? '#2e7d32' : '#c62828'}">${data.is_active ? '✓ 已启用' : '✗ 已禁用'}</span></div>
+                <div class="info-row"><span class="k">规则预览</span></div>
+                <div style="font-size:0.78rem;color:var(--text-2);line-height:1.6;padding:6px 0;max-height:120px;overflow-y:auto">${preview}<br>...</div>
+            `;
+        } else {
+            document.getElementById('settings-guidelines').innerHTML = '<div class="info-row"><span class="v" style="color:var(--text-3)">加载中...</span></div>';
+        }
+    }
+
+    function editEmailGuidelines() {
+        const html = `
+            <div class="form-group">
+                <label class="form-label">邮件规范内容（AI 生成邮件时必须遵循的规则）</label>
+                <textarea class="form-input" id="cfg-guidelines-content" rows="18" style="font-family:monospace;font-size:0.78rem;line-height:1.7;resize:vertical">${esc(currentEmailGuidelines.content || '')}</textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">
+                    <input type="checkbox" id="cfg-guidelines-active" ${currentEmailGuidelines.is_active ? 'checked' : ''} style="margin-right:6px">
+                    启用邮件规范
+                </label>
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+                <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+                <button class="btn btn-accent" onclick="saveEmailGuidelines()">保存</button>
+            </div>
+        `;
+        openModal('编辑邮件规范', html);
+    }
+
+    async function saveEmailGuidelines() {
+        const content = document.getElementById('cfg-guidelines-content').value.trim();
+        const isActive = document.getElementById('cfg-guidelines-active').checked;
+        if (!content) {
+            toast('规范内容不能为空', 'err');
+            return;
+        }
+        const res = await api('/api/email-guidelines', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, is_active: isActive })
+        });
+        if (res) {
+            toast('邮件规范已保存');
+            closeModal();
+            loadEmailGuidelines();
+        }
     }
 
     function editSmtpConfig() {
@@ -6177,7 +7757,7 @@
             overlay.id = 'modal-ai-import-overlay';
             overlay.className = 'modal-overlay';
             overlay.innerHTML = `
-                <div class="modal" style="max-width:680px;max-height:90vh;overflow-y:auto">
+                <div class="modal" style="max-width:900px;max-height:90vh;overflow-y:auto">
                     <div class="modal-head">
                         <h3>🤖 AI智能导入</h3>
                         <button class="modal-close" onclick="closeAIImportModal()">✕</button>
@@ -6201,8 +7781,13 @@
                             <div id="ai-file-items" style="max-height:200px;overflow-y:auto"></div>
                         </div>
                         <div id="ai-preview-area" style="margin-top:16px;display:none">
-                            <div style="font-weight:600;font-size:0.9rem;margin-bottom:10px">分析结果预览</div>
-                            <div id="ai-preview-content" style="max-height:300px;overflow-y:auto"></div>
+                            <div style="font-weight:600;font-size:0.9rem;margin-bottom:10px">分析结果预览 — 请确认或编辑后导入</div>
+                            <div id="ai-preview-content" style="display:grid;grid-template-columns:1fr 1.5fr;gap:16px;max-height:420px;overflow:hidden">
+                                <div id="ai-confirm-file-list" style="border:1px solid var(--border);border-radius:10px;padding:12px;overflow-y:auto;background:var(--bg)"></div>
+                                <div id="ai-confirm-editor" style="border:1px solid var(--border);border-radius:10px;padding:16px;overflow-y:auto;background:var(--bg)">
+                                    <div style="color:var(--text-3);font-size:0.85rem;text-align:center;padding:40px 20px">点击左侧文件进行编辑</div>
+                                </div>
+                            </div>
                         </div>
                         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
                             <button class="btn" onclick="closeAIImportModal()">取消</button>
@@ -6222,6 +7807,8 @@
         let overlay = document.getElementById('modal-ai-import-overlay');
         if (overlay) overlay.style.display = 'none';
         if (_aiBatchPollTimer) { clearInterval(_aiBatchPollTimer); _aiBatchPollTimer = null; }
+        window._aiConfirmData = null;
+        window._aiConfirmIndex = null;
     }
 
     // 全局存储AI分析文件和结果
@@ -6304,33 +7891,149 @@
         btn.textContent = '重新分析';
         btn.disabled = false;
 
-        // 显示预览
+        // 进入确认编辑模式
         const successResults = window._aiResults.filter(r => r.success);
         if (successResults.length > 0) {
             document.getElementById('ai-preview-area').style.display = 'block';
             document.getElementById('ai-import-btn').style.display = '';
-            document.getElementById('ai-preview-content').innerHTML = successResults.map(r => {
-                const a = r.analysis;
-                const confidence = (a.confidence * 100).toFixed(0);
-                const confidenceColor = confidence >= 80 ? 'var(--success)' : confidence >= 60 ? 'var(--accent)' : 'var(--muted)';
-                return `
-                    <div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--bg)">
-                        <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:8px">
-                            <div>
-                                <div style="font-weight:600;font-size:0.9rem">${a.name || r.filename}</div>
-                                <div style="font-size:0.8rem;color:var(--muted);margin-top:4px">${a.summary || ''}</div>
-                            </div>
-                            <div style="text-align:right">
-                                <span style="font-size:0.75rem;padding:3px 8px;border-radius:6px;background:rgba(102,126,234,0.1);color:var(--accent)">${a.material_type || ''}</span>
-                                <div style="font-size:0.75rem;margin-top:4px;color:${confidenceColor}">置信度 ${confidence}%</div>
-                            </div>
-                        </div>
-                        ${a.tags && a.tags.length ? `<div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">${a.tags.map(t => `<span style="font-size:0.7rem;padding:2px 8px;border-radius:4px;background:var(--bg2);color:var(--muted)">${t}</span>`).join('')}</div>` : ''}
-                        <div style="font-size:0.75rem;color:var(--muted);margin-top:6px;font-style:italic">${a.reason || ''}</div>
-                    </div>
-                `;
-            }).join('');
+
+            // 构建可编辑数据
+            window._aiConfirmData = successResults.map(r => {
+                const a = r.analysis || {};
+                return {
+                    filename: r.filename,
+                    name: a.name || r.filename,
+                    material_type: a.material_type || 'other',
+                    summary: a.summary || '',
+                    scope: a.scope || 'all',
+                    track: a.track || '',
+                    region: a.region || '',
+                    priority: a.priority || 3,
+                    confidence: a.confidence || 0,
+                    tags: a.tags || [],
+                    structured_content: a.structured_content || {},
+                    reason: a.reason || '',
+                    raw_analysis: a
+                };
+            });
+            window._aiConfirmIndex = 0;
+            renderAIConfirmList();
+            renderAIConfirmEditor(0);
         }
+    }
+
+    function renderAIConfirmList() {
+        const container = document.getElementById('ai-confirm-file-list');
+        container.innerHTML = window._aiConfirmData.map((item, idx) => {
+            const isActive = idx === window._aiConfirmIndex;
+            const typeLabel = {
+                'product_advantage': '产品优势', 'case_study': '案例', 'product_specification': '产品规格',
+                'company_profile': '公司简介', 'certification': '认证', 'market_research': '市场研究', 'other': '其他'
+            }[item.material_type] || item.material_type;
+            const confidence = ((item.confidence || 0) * 100).toFixed(0);
+            return `
+                <div onclick="switchAIConfirmItem(${idx})" style="padding:10px 12px;border-radius:8px;margin-bottom:6px;cursor:pointer;border:1.5px solid ${isActive ? 'var(--accent)' : 'var(--border)'};background:${isActive ? 'rgba(102,126,234,0.08)' : 'var(--surface)'};transition:all .15s">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <span style="font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">${esc(item.name)}</span>
+                        <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;background:rgba(102,126,234,0.1);color:var(--accent);flex-shrink:0;margin-left:6px">${typeLabel}</span>
+                    </div>
+                    <div style="font-size:0.72rem;color:var(--text-3);margin-top:4px">置信度 ${confidence}%</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function switchAIConfirmItem(idx) {
+        window._aiConfirmIndex = idx;
+        renderAIConfirmList();
+        renderAIConfirmEditor(idx);
+    }
+
+    function renderAIConfirmEditor(idx) {
+        const item = window._aiConfirmData[idx];
+        if (!item) return;
+        const container = document.getElementById('ai-confirm-editor');
+        const typeOptions = [
+            {value:'company_intro',label:'公司简介'},
+            {value:'product_info',label:'产品信息'},
+            {value:'advantage',label:'产品优势'},
+            {value:'brochure',label:'宣传册'},
+            {value:'case_study',label:'案例'},
+            {value:'sender_info',label:'发信人信息'},
+            {value:'custom',label:'自定义'}
+        ];
+        const scopeOptions = [
+            {value:'all',label:'全部'},
+            {value:'small_power',label:'小功率'},
+            {value:'large_power',label:'大功率'},
+            {value:'specific',label:'特定'}
+        ];
+        container.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <span style="font-size:0.85rem;font-weight:600;color:var(--text)">编辑资料 (${idx + 1}/${window._aiConfirmData.length})</span>
+                <span style="font-size:0.75rem;color:var(--text-3)">${esc(item.filename)}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+                <div>
+                    <label style="font-size:0.78rem;color:var(--text-3);display:block;margin-bottom:4px">名称</label>
+                    <input type="text" id="ai-edit-name" value="${esc(item.name)}" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;background:var(--surface)" oninput="updateAIConfirmData()">
+                </div>
+                <div>
+                    <label style="font-size:0.78rem;color:var(--text-3);display:block;margin-bottom:4px">类型</label>
+                    <select id="ai-edit-type" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;background:var(--surface)" onchange="updateAIConfirmData()">
+                        ${typeOptions.map(o => `<option value="${o.value}" ${item.material_type === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:0.78rem;color:var(--text-3);display:block;margin-bottom:4px">摘要</label>
+                    <textarea id="ai-edit-summary" rows="3" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;background:var(--surface);resize:vertical" oninput="updateAIConfirmData()">${esc(item.summary)}</textarea>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                    <div>
+                        <label style="font-size:0.78rem;color:var(--text-3);display:block;margin-bottom:4px">适用范围</label>
+                        <select id="ai-edit-scope" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;background:var(--surface)" onchange="updateAIConfirmData()">
+                            ${scopeOptions.map(o => `<option value="${o.value}" ${item.scope === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:0.78rem;color:var(--text-3);display:block;margin-bottom:4px">优先级 (1-5)</label>
+                        <input type="number" id="ai-edit-priority" min="1" max="5" value="${item.priority}" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;background:var(--surface)" oninput="updateAIConfirmData()">
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                    <div>
+                        <label style="font-size:0.78rem;color:var(--text-3);display:block;margin-bottom:4px">赛道</label>
+                        <input type="text" id="ai-edit-track" value="${esc(item.track)}" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;background:var(--surface)" oninput="updateAIConfirmData()">
+                    </div>
+                    <div>
+                        <label style="font-size:0.78rem;color:var(--text-3);display:block;margin-bottom:4px">地区</label>
+                        <input type="text" id="ai-edit-region" value="${esc(item.region)}" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;background:var(--surface)" oninput="updateAIConfirmData()">
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function updateAIConfirmData() {
+        const idx = window._aiConfirmIndex;
+        if (idx == null || !window._aiConfirmData) return;
+        const item = window._aiConfirmData[idx];
+        const nameEl = document.getElementById('ai-edit-name');
+        const typeEl = document.getElementById('ai-edit-type');
+        const summaryEl = document.getElementById('ai-edit-summary');
+        const scopeEl = document.getElementById('ai-edit-scope');
+        const trackEl = document.getElementById('ai-edit-track');
+        const regionEl = document.getElementById('ai-edit-region');
+        const priorityEl = document.getElementById('ai-edit-priority');
+        if (nameEl) item.name = nameEl.value;
+        if (typeEl) item.material_type = typeEl.value;
+        if (summaryEl) item.summary = summaryEl.value;
+        if (scopeEl) item.scope = scopeEl.value;
+        if (trackEl) item.track = trackEl.value;
+        if (regionEl) item.region = regionEl.value;
+        if (priorityEl) item.priority = parseInt(priorityEl.value) || 3;
+        // 同步更新左侧列表显示
+        renderAIConfirmList();
     }
 
     async function importAIResults() {
@@ -6338,50 +8041,28 @@
         btn.disabled = true;
         btn.textContent = '导入中...';
 
-        const successResults = window._aiResults.filter(r => r.success);
-        if (successResults.length === 0) {
+        if (!window._aiConfirmData || window._aiConfirmData.length === 0) {
             btn.disabled = false;
             btn.textContent = '确认导入';
             return;
         }
 
-        // 如果只有一个文件，直接调用单个导入API
-        if (successResults.length === 1) {
-            const r = successResults[0];
-            const fd = new FormData();
-            fd.append('file', window._aiFiles[window._aiResults.indexOf(r)]);
-            try {
-                const res = await fetch('/api/materials/import', { method: 'POST', body: fd });
-                const data = await res.json();
-                if (data.success) {
-                    showToast('素材导入成功');
-                    loadMaterials();
-                    closeAIImportModal();
-                } else {
-                    showToast(data.error || '导入失败', 'error');
-                }
-            } catch (e) {
-                showToast('网络请求失败', 'error');
-            }
-            btn.disabled = false;
-            btn.textContent = '确认导入';
-            return;
-        }
-
-        // 多个文件：使用批量导入
-        const fd = new FormData();
-        window._aiFiles.forEach(f => fd.append('files', f));
         try {
-            const res = await fetch('/api/materials/batch-import', { method: 'POST', body: fd });
+            const res = await fetch('/api/materials/analyze/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ previews: window._aiConfirmData })
+            });
             const data = await res.json();
-            if (data.success && data.task_id) {
+            if (data.success) {
+                toast(`导入完成: ${data.imported_count}个导入, ${data.skipped_count}个跳过, ${data.failed_count}个失败`);
+                loadMaterials();
                 closeAIImportModal();
-                showBatchProgress(data.task_id);
             } else {
-                showToast(data.error || '批量导入启动失败', 'error');
+                toast(data.error || '导入失败', 'err');
             }
         } catch (e) {
-            showToast('网络请求失败', 'error');
+            toast('网络请求失败', 'err');
         }
         btn.disabled = false;
         btn.textContent = '确认导入';
@@ -6562,6 +8243,137 @@
         hideDropdown('ls-location-dropdown');
     }
 
+    // ==================== 关键词分析 ====================
+    let analyzedKeywords = [];
+
+    function openKeywordAnalyzer() {
+        const query = document.getElementById('ls-query').value.trim();
+        if (!query) {
+            toast('请先输入搜索关键词', 'err');
+            return;
+        }
+        document.getElementById('modal-keyword-overlay').style.display = 'flex';
+        analyzeKeywords(query);
+    }
+
+    function closeKeywordModal() {
+        document.getElementById('modal-keyword-overlay').style.display = 'none';
+    }
+
+    async function analyzeKeywords(query) {
+        const location = document.getElementById('ls-location').value.trim();
+        const body = document.getElementById('keyword-modal-body');
+        body.innerHTML = `
+            <div style="text-align:center;padding:40px">
+                <div class="spinner" style="margin:0 auto 16px"></div>
+                <p style="color:var(--text-3)">AI 正在分析 "${esc(query)}" 的相关关键词...</p>
+            </div>
+        `;
+
+        try {
+            const res = await api('/api/search/expand-keywords', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, location, max_keywords: 12 })
+            });
+
+            if (res && res.keywords) {
+                analyzedKeywords = res.keywords;
+                renderKeywordAnalyzer(res);
+            } else {
+                body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--accent)">分析失败: ${esc(res?.error || '未知错误')}</div>`;
+            }
+        } catch (e) {
+            body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--accent)">分析出错: ${esc(e.message)}</div>`;
+        }
+    }
+
+    function renderKeywordAnalyzer(data) {
+        const categories = data.categories || {};
+        const catLabels = {
+            original: { label: '🔵 原始关键词', cls: 'original' },
+            product: { label: '📦 产品变体', cls: '' },
+            business_model: { label: '🏭 商业模式', cls: 'business' },
+            location: { label: '🌍 地区相关', cls: 'location' },
+            other: { label: '✨ 其他拓展', cls: '' }
+        };
+
+        let html = `
+            <div style="margin-bottom:16px">
+                <div style="font-size:0.9rem;color:var(--text);margin-bottom:4px">基础关键词: <strong>${esc(data.base_keyword)}</strong></div>
+                <div style="font-size:0.78rem;color:var(--text-3)">AI 生成了 ${data.total} 个相关关键词，点击选择要用于搜索的词</div>
+            </div>
+        `;
+
+        for (const [key, info] of Object.entries(catLabels)) {
+            const words = categories[key] || [];
+            if (words.length === 0) continue;
+            html += `
+                <div class="kw-category">
+                    <div class="kw-category-title">
+                        ${info.label}
+                        <span class="kw-category-count">(${words.length})</span>
+                    </div>
+                    <div class="kw-grid">
+                        ${words.map(w => `
+                            <div class="kw-chip ${info.cls}" data-keyword="${esc(w)}" onclick="toggleKeywordChip(this)">
+                                <span class="kw-check">✓</span>
+                                <span>${esc(w)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        html += `
+            <div style="display:flex;gap:10px;justify-content:space-between;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+                <div style="display:flex;gap:10px">
+                    <button class="btn btn-sm btn-ghost" onclick="selectAllKeywords(true)">全选</button>
+                    <button class="btn btn-sm btn-ghost" onclick="selectAllKeywords(false)">反选</button>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center">
+                    <span id="kw-selected-count" style="font-size:0.82rem;color:var(--text-3)">已选 0 个</span>
+                    <button class="btn btn-accent" onclick="confirmKeywordSearch()">✓ 使用选中关键词搜索</button>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('keyword-modal-body').innerHTML = html;
+        // 默认全选
+        selectAllKeywords(true);
+    }
+
+    function toggleKeywordChip(el) {
+        el.classList.toggle('selected');
+        updateKeywordCount();
+    }
+
+    function selectAllKeywords(select) {
+        document.querySelectorAll('.kw-chip').forEach(chip => {
+            if (select) chip.classList.add('selected');
+            else chip.classList.remove('selected');
+        });
+        updateKeywordCount();
+    }
+
+    function updateKeywordCount() {
+        const count = document.querySelectorAll('.kw-chip.selected').length;
+        document.getElementById('kw-selected-count').textContent = `已选 ${count} 个`;
+    }
+
+    function confirmKeywordSearch() {
+        const selected = Array.from(document.querySelectorAll('.kw-chip.selected')).map(el => el.dataset.keyword);
+        if (selected.length === 0) {
+            toast('请至少选择一个关键词', 'err');
+            return;
+        }
+        // 将选中的关键词用逗号分隔写入输入框
+        document.getElementById('ls-query').value = selected.join(', ');
+        closeKeywordModal();
+        toast(`已选择 ${selected.length} 个关键词，点击"开始搜索"执行`, 'info');
+    }
+
     async function createSearchTask() {
         const query = document.getElementById('ls-query').value.trim();
         const location = document.getElementById('ls-location').value.trim();
@@ -6587,21 +8399,31 @@
         btn.textContent = '启动中...';
 
         try {
+            // 检测是否包含多个关键词（来自关键词分析器）
+            const queryParts = query.split(',').map(q => q.trim()).filter(q => q);
+            const isMultiQuery = queryParts.length > 1;
+
+            const body = {
+                task_name: `${queryParts[0]}${queryParts.length > 1 ? ' +' + (queryParts.length - 1) : ''} - ${location || '全球'}`,
+                query: queryParts[0],
+                location: location,
+                platforms: platforms,
+                config: {
+                    max_results_per_platform: maxResults,
+                    enable_keyword_expand: !isMultiQuery && document.getElementById('ls-keyword-expand').checked,
+                    enable_ai_enrich: document.getElementById('ls-ai-enrich').checked,
+                    enable_website_crawl: document.getElementById('ls-website-crawl').checked,
+                    auto_import_threshold: document.getElementById('ls-auto-import').checked ? 0.8 : 0
+                }
+            };
+            if (isMultiQuery) {
+                body.queries = queryParts;
+            }
+
             const res = await api('/api/search/tasks', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    task_name: `${query} - ${location || '全球'}`,
-                    query: query,
-                    location: location,
-                    platforms: platforms,
-                    config: {
-                        max_results_per_platform: maxResults,
-                        enable_ai_enrich: document.getElementById('ls-ai-enrich').checked,
-                        enable_website_crawl: document.getElementById('ls-website-crawl').checked,
-                        auto_import_threshold: document.getElementById('ls-auto-import').checked ? 0.8 : 0
-                    }
-                })
+                body: JSON.stringify(body)
             });
             if (res) {
                 toast('搜索任务已创建', 'ok');
@@ -6990,12 +8812,102 @@
         }
     }
 
+    // ==================== API 配置模板 ====================
+    const API_PRESETS = [
+        {
+            id: 'deepseek', name: 'DeepSeek', icon: '🤖', color: '#4a7de4',
+            desc: 'DeepSeek 大语言模型，用于 AI 智能分析、邮件内容生成、客户资料深度解析。推荐模型：deepseek-chat',
+            nameVal: 'DeepSeek', url: 'https://api.deepseek.com', model: 'deepseek-chat',
+            showUrl: true, showModel: true, showDesc: true
+        },
+        {
+            id: 'google_places', name: 'Google Places', icon: '📍', color: '#e85d4a',
+            desc: 'Google Places API 用于 Google Maps 搜索客户地址和公司信息。无此 Key 时自动降级为 Chrome 爬虫模式。',
+            nameVal: 'Google Places', url: 'https://maps.googleapis.com/maps/api', model: '',
+            showUrl: true, showModel: false, showDesc: true
+        },
+        {
+            id: 'openai', name: 'OpenAI', icon: '💡', color: '#10a37f',
+            desc: 'OpenAI GPT 系列模型，可作为 DeepSeek 的替代方案用于 AI 分析。支持 GPT-4o、GPT-4o-mini 等模型。',
+            nameVal: 'OpenAI', url: 'https://api.openai.com/v1', model: 'gpt-4o-mini',
+            showUrl: true, showModel: true, showDesc: true
+        },
+        {
+            id: 'hunter', name: 'Hunter.io', icon: '🎯', color: '#c9943e',
+            desc: 'Hunter.io API 用于批量查找公司域名下的员工邮箱地址。需要在 config/search_config.json 中配置 hunter_api_key。',
+            nameVal: 'Hunter', url: 'https://api.hunter.io/v2', model: '',
+            showUrl: true, showModel: false, showDesc: true
+        },
+        {
+            id: 'gemini', name: 'Google Gemini', icon: '✨', color: '#8b6ce8',
+            desc: 'Google Gemini 模型，可作为 DeepSeek 替代方案。支持 gemini-2.0-flash 等模型，需要 Google AI API Key。',
+            nameVal: 'Gemini', url: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.0-flash',
+            showUrl: true, showModel: true, showDesc: true
+        },
+        {
+            id: 'custom', name: '自定义 API', icon: '⚙', color: '#5a5a7a',
+            desc: '',
+            nameVal: '', url: '', model: '',
+            showUrl: true, showModel: true, showDesc: false
+        }
+    ];
+
+    let selectedPreset = null;
+
+    function renderApiPresets() {
+        const grid = document.getElementById('api-preset-grid');
+        if (!grid) return;
+        grid.innerHTML = API_PRESETS.map(p => `
+            <div class="api-preset-card" data-preset="${p.id}" onclick="selectApiPreset('${p.id}')" style="
+                background:var(--surface);border:2px solid var(--border);border-radius:10px;
+                padding:14px 12px;cursor:pointer;text-align:center;transition:all .15s">
+                <div style="font-size:1.5rem;margin-bottom:6px">${p.icon}</div>
+                <div style="font-size:0.85rem;font-weight:600;color:var(--text)">${p.name}</div>
+            </div>
+        `).join('');
+    }
+
+    function selectApiPreset(presetId) {
+        const preset = API_PRESETS.find(p => p.id === presetId);
+        if (!preset) return;
+        selectedPreset = preset;
+
+        // 高亮选中卡片
+        document.querySelectorAll('.api-preset-card').forEach(card => {
+            const isActive = card.dataset.preset === presetId;
+            card.style.borderColor = isActive ? preset.color : 'var(--border)';
+            card.style.background = isActive ? 'var(--surface-2)' : 'var(--surface)';
+        });
+
+        // 填充表单
+        document.getElementById('api-name').value = preset.nameVal;
+        document.getElementById('api-base-url').value = preset.url;
+        document.getElementById('api-model').value = preset.model;
+
+        // 显示/隐藏字段
+        document.getElementById('api-url-group').style.display = preset.showUrl ? '' : 'none';
+        document.getElementById('api-model-group').style.display = preset.showModel ? '' : 'none';
+
+        // 说明文字
+        const descGroup = document.getElementById('api-desc-group');
+        if (preset.showDesc && preset.desc) {
+            descGroup.style.display = '';
+            document.getElementById('api-desc-text').textContent = preset.desc;
+        } else {
+            descGroup.style.display = 'none';
+        }
+
+        // 聚焦到 API Key 输入框
+        document.getElementById('api-key').focus();
+    }
+
     function showApiConfigModal(editName) {
         document.getElementById('api-modal-title').textContent = editName ? '编辑 API 配置' : '添加 API 配置';
         const nameInput = document.getElementById('api-name');
         const keyInput = document.getElementById('api-key');
         const urlInput = document.getElementById('api-base-url');
         const modelInput = document.getElementById('api-model');
+        const presetSection = document.getElementById('api-preset-section');
 
         if (editName) {
             const cfg = apiConfigsCache.find(c => c.api_name === editName);
@@ -7005,12 +8917,22 @@
             keyInput.value = cfg.api_key;
             urlInput.value = cfg.base_url || '';
             modelInput.value = cfg.model || '';
+            presetSection.style.display = 'none';
+            document.getElementById('api-url-group').style.display = '';
+            document.getElementById('api-model-group').style.display = '';
+            document.getElementById('api-desc-group').style.display = 'none';
         } else {
             nameInput.value = '';
             nameInput.disabled = false;
             keyInput.value = '';
             urlInput.value = '';
             modelInput.value = '';
+            presetSection.style.display = '';
+            document.getElementById('api-url-group').style.display = '';
+            document.getElementById('api-model-group').style.display = '';
+            document.getElementById('api-desc-group').style.display = 'none';
+            selectedPreset = null;
+            renderApiPresets();
         }
         document.getElementById('api-config-modal').style.display = 'flex';
     }
@@ -7037,7 +8959,7 @@
             const res = await fetch(url, {
                 method: method,
                 headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                body: JSON.stringify({ api_key: key, base_url: baseUrl, model: model })
+                body: JSON.stringify({ api_name: name, api_key: key, base_url: baseUrl, model: model })
             });
             const data = await res.json();
             if (data && data.success) {
@@ -7371,6 +9293,218 @@
         html += `<button class="page-btn" onclick="${callback.name}(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>下一页</button>`;
         html += `<button class="page-btn" onclick="${callback.name}(${totalPages})" ${page >= totalPages ? 'disabled' : ''}>末页</button>`;
         container.innerHTML = html;
+    }
+
+    // ==================== INVITE CODE MANAGEMENT ====================
+    let invCodesPage = 1;
+    const INV_CODES_PER_PAGE = 10;
+
+    function toggleInviteGenForm() {
+        const form = document.getElementById('invite-gen-form');
+        if (form.style.display === 'none') {
+            form.style.display = 'block';
+        } else {
+            form.style.display = 'none';
+            document.getElementById('inv-gen-result').style.display = 'none';
+        }
+    }
+
+    async function loadInviteCodesStats() {
+        try {
+            const res = await fetch('/api/admin/invite-codes/stats', {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (res.status === 401) { window.location.href = '/login.html'; return; }
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.success) {
+                const s = data.data;
+                document.getElementById('inv-stat-total').textContent = s.total || 0;
+                document.getElementById('inv-stat-active').textContent = s.active || 0;
+                document.getElementById('inv-stat-uses').textContent = s.total_uses || 0;
+                document.getElementById('inv-stat-users').textContent = s.unique_users || 0;
+            }
+        } catch (e) {
+            console.error('Load invite stats error:', e);
+        }
+    }
+
+    async function loadInviteCodes(page) {
+        if (page) invCodesPage = page;
+        loadInviteCodesStats();
+
+        try {
+            const res = await fetch(`/api/admin/invite-codes?page=${invCodesPage}&per_page=${INV_CODES_PER_PAGE}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (res.status === 401) { window.location.href = '/login.html'; return; }
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!data.success) return;
+
+            const { items, total, page: curPage, per_page } = data.data;
+            const tbody = document.getElementById('invite-codes-tbody');
+
+            if (!items || items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:30px">暂无邀请码</td></tr>';
+                document.getElementById('invite-pagination').innerHTML = '';
+                return;
+            }
+
+            tbody.innerHTML = items.map(item => {
+                // Status badge
+                let statusBadge = '';
+                if (item.is_disabled) {
+                    statusBadge = '<span class="badge badge-neutral">已禁用</span>';
+                } else if (item.is_expired) {
+                    statusBadge = '<span class="badge badge-err">已过期</span>';
+                } else if (item.used_count >= item.max_uses) {
+                    statusBadge = '<span class="badge badge-err">已用完</span>';
+                } else {
+                    statusBadge = '<span class="badge badge-ok">活跃</span>';
+                }
+
+                // Expiry display
+                const expiresDisplay = item.expires_at ? formatDate(item.expires_at) : '永不过期';
+
+                const toggleLabel = item.is_disabled ? '启用' : '禁用';
+                const toggleClass = item.is_disabled ? 'btn-teal' : 'btn-ghost';
+
+                return `<tr>
+                    <td><span style="font-family:'Courier New',monospace;font-weight:700;letter-spacing:1.5px;font-size:0.84rem">${esc(item.code)}</span></td>
+                    <td>${statusBadge}</td>
+                    <td>${item.used_count || 0} / ${item.max_uses || 1}</td>
+                    <td class="cell-muted cell-ellipsis" style="max-width:160px">${esc(item.note || '-')}</td>
+                    <td class="cell-muted">${formatDate(item.created_at)}</td>
+                    <td style="white-space:nowrap">
+                        <button class="btn btn-sm ${toggleClass}" onclick="toggleInviteCode(${item.id})" style="margin-right:4px">${toggleLabel}</button>
+                        <button class="btn btn-sm btn-ghost" style="color:var(--accent)" onclick="deleteInviteCode(${item.id},'${esc(item.code)}')">&#128465;</button>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Pagination
+            const totalPages = Math.ceil((total || 0) / (per_page || INV_CODES_PER_PAGE));
+            renderPagination(document.getElementById('invite-pagination'), curPage || 1, totalPages, loadInviteCodes);
+        } catch (e) {
+            console.error('Load invite codes error:', e);
+        }
+    }
+
+    async function generateInviteCodes() {
+        const count = parseInt(document.getElementById('inv-gen-count').value) || 1;
+        const maxUses = parseInt(document.getElementById('inv-gen-max-uses').value) || 1;
+        const expiry = parseInt(document.getElementById('inv-gen-expiry').value);
+        const note = document.getElementById('inv-gen-note').value.trim();
+
+        if (count < 1 || count > 50) { toast('数量须在 1-50 之间', 'err'); return; }
+
+        const btn = document.getElementById('inv-gen-btn');
+        btn.disabled = true;
+        btn.textContent = '生成中...';
+
+        try {
+            const res = await fetch('/api/admin/invite-codes', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({
+                    count: count,
+                    max_uses: maxUses,
+                    expires_days: expiry,
+                    note: note
+                })
+            });
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+                const codes = data.codes || (Array.isArray(data) ? data : []);
+                // Show generated codes
+                const resultDiv = document.getElementById('inv-gen-result');
+                const listDiv = document.getElementById('inv-gen-codes-list');
+                resultDiv.style.display = 'block';
+
+                listDiv.innerHTML = (Array.isArray(codes) ? codes : [codes]).map(c => {
+                    const code = typeof c === 'string' ? c : c.code;
+                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm)">
+                        <span style="font-family:'Courier New',monospace;font-weight:700;letter-spacing:2px;font-size:0.9rem">${esc(code)}</span>
+                        <button class="btn btn-sm btn-ghost" onclick="copyToClipboard('${esc(code)}')" style="font-size:0.72rem">复制</button>
+                    </div>`;
+                }).join('');
+
+                // Reset form
+                document.getElementById('inv-gen-count').value = 1;
+                document.getElementById('inv-gen-max-uses').value = 1;
+                document.getElementById('inv-gen-note').value = '';
+
+                // Reload list
+                loadInviteCodes(1);
+                toast(`成功生成 ${Array.isArray(codes) ? codes.length : 1} 个邀请码`, 'ok');
+            } else {
+                toast(data.error || data.message || '生成失败', 'err');
+            }
+        } catch (e) {
+            console.error('Generate invite codes error:', e);
+            toast('生成失败，请稍后重试', 'err');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '批量生成';
+        }
+    }
+
+    async function toggleInviteCode(id) {
+        try {
+            const res = await fetch(`/api/admin/invite-codes/${id}/toggle`, {
+                method: 'PUT',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (res.ok) {
+                loadInviteCodes();
+            } else {
+                const data = await res.json();
+                toast(data.error || '操作失败', 'err');
+            }
+        } catch (e) {
+            toast('操作失败', 'err');
+        }
+    }
+
+    async function deleteInviteCode(id, code) {
+        if (!confirm(`确定要删除邀请码 ${code} 吗？此操作不可撤销。`)) return;
+        try {
+            const res = await fetch(`/api/admin/invite-codes/${id}`, {
+                method: 'DELETE',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (res.ok) {
+                loadInviteCodes();
+                toast('已删除', 'ok');
+            } else {
+                const data = await res.json();
+                toast(data.error || '删除失败', 'err');
+            }
+        } catch (e) {
+            toast('删除失败', 'err');
+        }
+    }
+
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            toast('已复制到剪贴板', 'ok');
+        }).catch(() => {
+            // Fallback
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            toast('已复制到剪贴板', 'ok');
+        });
     }
 
     // ==================== INIT ====================

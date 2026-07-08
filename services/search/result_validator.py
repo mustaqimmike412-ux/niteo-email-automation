@@ -25,6 +25,82 @@ class ValidationResult:
 class ResultValidator:
     """搜索结果验证器 — 五层漏斗校验"""
 
+    # ===== 国家/地区同义词库（仅用于过滤，不参与文本匹配打分）=====
+    COUNTRY_SYNONYMS = {
+        'usa': {'usa', 'us', 'united states', 'united states of america', 'america', 'american',
+                'u.s.a', 'u.s.a.', 'unitedstates', 'u.s.', 'us of a', 'the states', 'stateside'},
+        'uk': {'uk', 'united kingdom', 'britain', 'great britain', 'england', 'english', 'scotland', 'wales',
+               'northern ireland', 'british', 'u.k.', 'u.k', 'gb', 'g.b.', 'unitedkingdom'},
+        'germany': {'germany', 'german', 'deutschland', 'de', 'bundesrepublik deutschland', 'federal republic of germany',
+                   'alemania', 'allemagne'},
+        'france': {'france', 'french', 'république française', 'republic of france', 'française', 'francaise'},
+        'china': {'china', 'chinese', 'prc', "people's republic of china", 'pr of china',
+                  'zhongguo', 'mainland china', 'shenzhen', 'guangzhou', 'beijing', 'shanghai',
+                  'dongguan', 'yiwu'},
+        'india': {'india', 'indian', 'bharat', 'republic of india', 'hindustan'},
+        'japan': {'japan', 'japanese', 'nippon', 'nihon'},
+        'australia': {'australia', 'australian', 'aussie', 'oz', 'commonwealth of australia'},
+        'canada': {'canada', 'canadian', 'ca'},
+        'italy': {'italy', 'italian', 'italia', 'republic of italy'},
+        'spain': {'spain', 'spanish', 'españa', 'espana', 'es'},
+        'brazil': {'brazil', 'brazilian', 'brasil', 'br', 'federative republic of brazil'},
+        'mexico': {'mexico', 'mexican', 'méxico', 'mx', 'united mexican states'},
+        'south korea': {'south korea', 'korean', 'republic of korea', 'rok', 'korea'},
+        'netherlands': {'netherlands', 'dutch', 'holland', 'nederland', 'the netherlands', 'nl'},
+        'turkey': {'turkey', 'turkish', 'türkiye', 'türkiye cumhuriyeti'},
+        'thailand': {'thailand', 'thai', 'kingdom of thailand'},
+        'vietnam': {'vietnam', 'vietnamese', 'viet nam', 'socialist republic of vietnam'},
+        'indonesia': {'indonesia', 'indonesian', 'id'},
+        'malaysia': {'malaysia', 'malaysian', 'my'},
+        'singapore': {'singapore', 'singaporean', 'sg'},
+        'uae': {'uae', 'united arab emirates', 'dubai', 'abu dhabi', 'emirates', 'emirati'},
+        'saudi arabia': {'saudi arabia', 'saudi', 'ksa', 'kingdom of saudi arabia'},
+        'russia': {'russia', 'russian', 'russian federation', 'ru', 'russa'},
+        'poland': {'poland', 'polish', 'polska', 'republic of poland', 'pl'},
+        'switzerland': {'switzerland', 'swiss', 'schweiz', 'suisse', 'svizzera', 'ch'},
+        'sweden': {'sweden', 'swedish', 'sverige', 'kingdom of sweden', 'se'},
+        'norway': {'norway', 'norwegian', 'norge', 'kingdom of norway', 'no'},
+        'denmark': {'denmark', 'danish', 'danmark', 'kingdom of denmark', 'dk'},
+        'finland': {'finland', 'finnish', 'suomi', 'republic of finland', 'fi'},
+        'ireland': {'ireland', 'irish', 'republic of ireland', 'eire', 'ie'},
+        'austria': {'austria', 'austrian', 'österreich', 'oesterreich', 'at'},
+        'belgium': {'belgium', 'belgian', 'belgique', 'belgië', 'be'},
+        'portugal': {'portugal', 'portuguese', 'república portuguesa', 'pt'},
+        'czech republic': {'czech republic', 'czech', 'czechia', 'češka', 'cz'},
+        'argentina': {'argentina', 'argentine', 'argentino'},
+        'south africa': {'south africa', 'south african', 'sa', 'za', 'republic of south africa'},
+        'egypt': {'egypt', 'egyptian', 'arab republic of egypt', 'eg'},
+        'philippines': {'philippines', 'filipino', 'ph', 'republic of the philippines'},
+        'colombia': {'colombia', 'colombian', 'co'},
+        'chile': {'chile', 'chilean', 'cl'},
+        'israel': {'israel', 'israeli', 'il', 'state of israel'},
+        'new zealand': {'new zealand', 'nz', 'aotearoa', 'kiwi'},
+        'taiwan': {'taiwan', 'taiwanese', 'tw', 'roc'},
+        'hong kong': {'hong kong', 'hk', 'hongkong'},
+        'europe': {'europe', 'european', 'eu', 'eurozone'},
+        'asia': {'asia', 'asian'},
+        'africa': {'africa', 'african'},
+        'middle east': {'middle east', 'mena', 'gulf', 'gcc'},
+        'southeast asia': {'southeast asia', 'sea', 'asean'},
+        'latin america': {'latin america', 'latam', 'latinoamérica'},
+        'worldwide': {'worldwide', 'global', 'international', 'world', 'all countries'},
+    }
+
+    def _build_country_word_set(self, location: str = '') -> set:
+        """根据目标地区构建国家同义词集合，用于从匹配关键词中排除"""
+        country_words = set()
+        if location:
+            loc_lower = location.lower().strip()
+            for key, synonyms in self.COUNTRY_SYNONYMS.items():
+                if loc_lower in synonyms or loc_lower == key:
+                    country_words.update(synonyms)
+            # 如果没找到精确匹配，直接把 location 本身加入
+            if not country_words:
+                loc_words = [w for w in re.findall(r'[a-z]+', loc_lower) if len(w) >= 2]
+                country_words.update(loc_words)
+                country_words.add(loc_lower)
+        return country_words
+
     # ===== Layer 1: 域名黑名单 =====
     DOMAIN_BLACKLIST = {
         # 论坛类
@@ -278,10 +354,11 @@ class ResultValidator:
 
     # ========== Layer 4: 内容相关性评分 ==========
 
-    def calculate_relevance_score(self, query: str, title: str, description: str) -> float:
+    def calculate_relevance_score(self, query: str, title: str, description: str, location: str = '') -> float:
         """
         计算搜索查询与页面内容的相关性分数
         返回 0.0-1.0
+        重要：国家/地区词汇不参与匹配打分
         """
         if not query:
             return 0.5
@@ -294,12 +371,20 @@ class ResultValidator:
         if not content.strip():
             return 0.3  # 无内容，较低分
 
+        # 构建国家词排除集
+        country_words = self._build_country_word_set(location)
+
+        # 仅使用非国家词进行匹配
+        product_words = [w for w in query_words if w not in country_words]
+        if not product_words:
+            product_words = query_words  # 如果所有词都被排除了，仍用原始词（兜底）
+
         matched = 0
-        for word in query_words:
+        for word in product_words:
             if word in content:
                 matched += 1
 
-        score = matched / len(query_words)
+        score = matched / len(product_words) if product_words else 0.5
         # 映射到 0.2-1.0
         return 0.2 + score * 0.8
 
@@ -352,7 +437,7 @@ class ResultValidator:
 
     # ========== 综合验证入口 ==========
 
-    def validate(self, result: SearchResult, query: str = '') -> ValidationResult:
+    def validate(self, result: SearchResult, query: str = '', location: str = '') -> ValidationResult:
         """
         对单个搜索结果执行完整五层验证
         """
@@ -403,7 +488,7 @@ class ResultValidator:
                     scores['layer3_probe'] = 1.0
                     # Layer 4: 相关性评分
                     relevance = self.calculate_relevance_score(
-                        query, probe.get('title', ''), probe.get('description', '')
+                        query, probe.get('title', ''), probe.get('description', ''), location
                     )
                     scores['layer4_relevance'] = relevance
             else:
@@ -449,7 +534,7 @@ class ResultValidator:
 
         return vr
 
-    def validate_crawl_content(self, result: SearchResult, crawl_data: dict, query: str = '') -> Tuple[bool, float]:
+    def validate_crawl_content(self, result: SearchResult, crawl_data: dict, query: str = '', location: str = '') -> Tuple[bool, float]:
         """
         基于网站爬取内容二次验证
         返回 (是否通过, 置信度)
@@ -471,9 +556,10 @@ class ResultValidator:
         if result.company_name and result.company_name.lower() in about_text.lower():
             return True, 0.8
 
-        # 检查搜索关键词是否在页面内容中
+        # 检查搜索关键词是否在页面内容中（排除国家词）
         if query:
-            query_words = [w for w in re.findall(r'[a-z0-9]+', query.lower()) if len(w) >= 3]
+            country_words = self._build_country_word_set(location)
+            query_words = [w for w in re.findall(r'[a-z0-9]+', query.lower()) if len(w) >= 3 and w not in country_words]
             matched = sum(1 for w in query_words if w in about_text.lower())
             if query_words and matched / len(query_words) >= 0.5:
                 return True, 0.7
@@ -487,7 +573,7 @@ class ResultValidator:
 
     # ========== 批量验证 ==========
 
-    def run_pre_crawl_validation(self, results: List[SearchResult], query: str = '') -> List[SearchResult]:
+    def run_pre_crawl_validation(self, results: List[SearchResult], query: str = '', location: str = '') -> List[SearchResult]:
         """
         对搜索结果列表执行预爬取验证（Layer 1-5）
         更新每个结果的 validation_status 和 confidence_score
@@ -499,7 +585,7 @@ class ResultValidator:
             return results
 
         for result in results:
-            vr = self.validate(result, query)
+            vr = self.validate(result, query, location)
             result.confidence_score = vr.confidence_score
             result.probe_data = vr.probe_data
 

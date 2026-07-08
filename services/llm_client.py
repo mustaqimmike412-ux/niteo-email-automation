@@ -320,6 +320,16 @@ Our company info:
   * {company_info.get('strength3', 'International certifications')}
   * {company_info.get('strength4', 'R&D customization')}"""
 
+        # 加载邮件规范
+        from database.email_guidelines_models import get_active_guidelines_text
+        guidelines_text = get_active_guidelines_text()
+
+        system_prompt += f"""
+
+---
+EMAIL GUIDELINES (MUST FOLLOW — these override any conflicting instructions above):
+{guidelines_text}"""
+
         # 补充更多客户背调信息
         products_info = research_result.get('module2_products', {})
         business_model = profile.get('business_model', 'unknown')
@@ -704,6 +714,16 @@ CONTENT RULES:
 - Do NOT mention visiting their website if no website is provided
 - Write in English
 - Output format: First line is "SUBJECT: <subject>", then a blank line, then the body"""
+
+        # 加载邮件规范
+        from database.email_guidelines_models import get_active_guidelines_text
+        guidelines_text = get_active_guidelines_text()
+
+        system_prompt += f"""
+
+---
+EMAIL GUIDELINES (MUST FOLLOW — these override any conflicting instructions above):
+{guidelines_text}"""
 
         user_prompt = f"""Recipient: {greeting_target}
 Company: {customer_name}

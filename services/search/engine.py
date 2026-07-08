@@ -13,6 +13,7 @@ from services.search.ai_enricher import SearchAIEnricher
 from services.search.website_crawler import WebsiteCrawler
 from services.search.email_finder import EmailFinder
 from services.search.result_validator import ResultValidator
+from services.search.keyword_expander import KeywordExpander
 from database.search_models import (
     create_search_task, update_search_task, save_search_result,
     get_search_task, import_result_to_customer
@@ -28,19 +29,22 @@ class SearchTaskEngine:
         self.crawler = WebsiteCrawler()
         self.email_finder = EmailFinder()
         self.validator = ResultValidator()
+        self.keyword_expander = KeywordExpander()
         self._tasks: Dict[str, dict] = {}  # 内存中的任务状态
         self._lock = threading.Lock()
         self._running_count = 0
         self._max_concurrent = 3
 
     def create_and_run(self, query: str, location: str, platforms: List[str],
-                       config: dict = None, task_name: str = None) -> str:
+                       config: dict = None, task_name: str = None,
+                       queries: List[str] = None,
+                       user_id: int = None) -> str:
         """创建并启动搜索任务"""
         task_id = f"search_{uuid.uuid4().hex[:8]}"
         cfg = config or {}
 
         # 创建数据库记录
-        create_search_task(task_id, query, location, platforms, cfg, task_name)
+        create_search_task(task_id, query, location, platforms, cfg, task_name, user_id=user_id)
 
         # 检查并发限制
         with self._lock:
@@ -52,7 +56,7 @@ class SearchTaskEngine:
         # 启动后台线程
         thread = threading.Thread(
             target=self._execute_search,
-            args=(task_id, query, location, platforms, cfg),
+            args=(task_id, query, location, platforms, cfg, queries, user_id),
             daemon=True
         )
         with self._lock:
@@ -67,7 +71,9 @@ class SearchTaskEngine:
         return task_id
 
     def _execute_search(self, task_id: str, query: str, location: str,
-                        platforms: List[str], config: dict):
+                        platforms: List[str], config: dict,
+                        preset_queries: List[str] = None,
+                        user_id: int = None):
         """实际执行搜索任务"""
         max_results = config.get('max_results_per_platform', 20)
         enable_ai = config.get('enable_ai_enrich', True)
@@ -93,69 +99,102 @@ class SearchTaskEngine:
             blacklist_names = set()
 
         try:
-            # 计算预计目标数
+            # === AI 关键词拓展（或直接使用预设关键词）===
+            if preset_queries:
+                queries = preset_queries
+                update_search_task(task_id, expanded_keywords=','.join(queries))
+                print(f"[SearchEngine] {task_id} 使用预设关键词列表: {queries}")
+            else:
+                queries = [query]
+                enable_expand = config.get('enable_keyword_expand', False)
+                if enable_expand:
+                    print(f"[SearchEngine] {task_id} 启用关键词拓展...")
+                    expanded = self.keyword_expander.expand(query, location, max_keywords=config.get('max_expanded_keywords', 8))
+                    if len(expanded) > 1:
+                        queries = expanded
+                        update_search_task(task_id, expanded_keywords=','.join(queries))
+                        print(f"[SearchEngine] {task_id} 关键词拓展完成: {queries}")
+
+            # 计算预计目标数：用户设置的 max_results 是总量上限，不是每个关键词的上限
             total_targets = len(platforms) * max_results
             update_search_task(task_id, total_targets=total_targets)
 
-            # 遍历每个平台
+            # === 阶段1：收集 — 用所有关键词搜索，每个关键词获取更多候选 ===
+            raw_results = []  # 收集所有原始结果（未截断）
             for platform in platforms:
-                # 检查是否超时
-                if time.time() - start_time > max_duration:
-                    update_search_task(task_id, status='completed',
-                                       error_message='任务因超时而终止')
-                    break
+                for q in queries:
+                    # 检查是否超时
+                    if time.time() - start_time > max_duration:
+                        update_search_task(task_id, status='completed',
+                                           error_message='任务因超时而终止')
+                        break
 
-                # 检查任务状态
-                task = get_search_task(task_id)
-                if task and task.get('status') == 'cancelled':
-                    break
+                    # 检查任务状态
+                    task = get_search_task(task_id)
+                    if task and task.get('status') == 'cancelled':
+                        break
 
-                try:
-                    searcher = self.registry.get_searcher(platform, config)
-                    if not searcher.is_available():
-                        print(f"[SearchEngine] {platform} 不可用，跳过")
+                    try:
+                        searcher = self.registry.get_searcher(platform, config)
+                        if not searcher.is_available():
+                            print(f"[SearchEngine] {platform} 不可用，跳过")
+                            continue
+
+                        print(f"[SearchEngine] {task_id} 搜索 {platform}: '{q}' in '{location}'")
+                        # 获取更多候选用于后续筛选（最多30个/关键词，避免过多）
+                        results = searcher.search(q, location, min(max_results * 3, 30))
+                        print(f"[SearchEngine] {platform} 找到 {len(results)} 条原始结果")
+                    except Exception as e:
+                        print(f"[SearchEngine] {platform} 搜索失败: {e}")
                         continue
-
-                    print(f"[SearchEngine] {task_id} 搜索 {platform}: '{query}' in '{location}'")
-                    results = searcher.search(query, location, max_results)
-                    print(f"[SearchEngine] {platform} 找到 {len(results)} 条结果")
 
                     # === 第一层漏斗：预爬取验证（Layer 1-5）===
                     pre_filter_count = len(results)
-                    results = self.validator.run_pre_crawl_validation(results, query)
+                    results = self.validator.run_pre_crawl_validation(results, query, location)
                     filtered_count = pre_filter_count - len([r for r in results if r.validation_status != 'rejected'])
-                    print(f"[SearchEngine] {platform} 验证过滤: {pre_filter_count} → {len(results)} 条（过滤 {filtered_count} 条）")
-
-                    # 去重（基于website域名）
-                    seen_websites = set()
-                    for r in all_results:
-                        seen_websites.add(searcher._normalize_website(r.website))
+                    print(f"[SearchEngine] {platform} 验证过滤: {pre_filter_count} → {len(results)} 条")
 
                     for r in results:
-                        norm_web = searcher._normalize_website(r.website)
-                        if norm_web and norm_web in seen_websites:
-                            continue
-                        if norm_web:
-                            seen_websites.add(norm_web)
-
-                        # 拉黑过滤：按域名或公司名匹配
-                        r_name = (r.raw_data.get('name') or '').lower().strip()
-                        if norm_web and norm_web.lower() in blacklist_websites:
-                            print(f"[SearchEngine] 跳过拉黑域名: {norm_web}")
-                            continue
-                        if r_name and r_name in blacklist_names:
-                            print(f"[SearchEngine] 跳过拉黑公司: {r_name}")
-                            continue
-
-                        r.search_keyword = query
+                        r.search_keyword = q
                         r.search_location = location
-                        all_results.append(r)
+                        raw_results.append(r)
 
                     time.sleep(delay)
 
-                except Exception as e:
-                    print(f"[SearchEngine] {platform} 搜索失败: {e}")
+            # === 阶段2：全局去重 + 截断 — 所有关键词的结果合并后只保留最好的 max_results 个 ===
+            print(f"[SearchEngine] {task_id} 收集完成: {len(raw_results)} 条原始结果，去重并截断到 {max_results} 条...")
+
+            # 全局去重（基于 website 域名）
+            seen_websites = set()
+            deduped_results = []
+            for r in raw_results:
+                norm_web = (r.website or '').lower().strip().replace('http://', '').replace('https://', '').replace('www.', '')
+                if not norm_web:
                     continue
+                if norm_web in seen_websites:
+                    continue
+                seen_websites.add(norm_web)
+
+                # 拉黑过滤
+                r_name = (r.raw_data.get('name') or '').lower().strip()
+                if norm_web in blacklist_websites:
+                    print(f"[SearchEngine] 跳过拉黑域名: {norm_web}")
+                    continue
+                if r_name and r_name in blacklist_names:
+                    print(f"[SearchEngine] 跳过拉黑公司: {r_name}")
+                    continue
+
+                deduped_results.append(r)
+
+            print(f"[SearchEngine] {task_id} 去重后: {len(deduped_results)} 条")
+
+            # 按 confidence_score 排序，取前 max_results 个
+            if len(deduped_results) > max_results:
+                deduped_results.sort(key=lambda r: r.confidence_score or 0, reverse=True)
+                all_results = deduped_results[:max_results]
+                print(f"[SearchEngine] {task_id} 截断到前 {max_results} 条（按置信度排序）")
+            else:
+                all_results = deduped_results
 
             found_count = len(all_results)
             update_search_task(task_id, found_count=found_count)
@@ -176,7 +215,7 @@ class SearchTaskEngine:
                             if crawl_data:
                                 # 爬取后二次校验
                                 passed, crawl_score = self.validator.validate_crawl_content(
-                                    result, crawl_data, query)
+                                    result, crawl_data, query, location)
                                 if passed:
                                     result.confidence_score = max(result.confidence_score, crawl_score)
                                     # 补充爬取到的信息
@@ -334,7 +373,8 @@ class SearchTaskEngine:
                     pre_crawl_score=result.confidence_score,
                     crawl_validation_passed=result.validation_status == 'validated',
                     probe_title=result.probe_data.get('title', '') if result.probe_data else '',
-                    probe_description=result.probe_data.get('description', '') if result.probe_data else ''
+                    probe_description=result.probe_data.get('description', '') if result.probe_data else '',
+                    user_id=user_id
                 )
 
                 # 自动导入（高置信度）

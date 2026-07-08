@@ -9,13 +9,13 @@ from database.connection import get_connection
 # ==================== Search Tasks ====================
 
 def create_search_task(task_id: str, query: str, location: str, platforms: list,
-                       config: dict = None, task_name: str = None) -> int:
+                       config: dict = None, task_name: str = None, user_id: int = None) -> int:
     """创建搜索任务，返回任务DB ID"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO search_tasks (task_id, task_name, query_text, location, platforms, config_json, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO search_tasks (task_id, task_name, query_text, location, platforms, config_json, status, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         task_id,
         task_name or f"{query} - {location or '全球'}",
@@ -23,7 +23,8 @@ def create_search_task(task_id: str, query: str, location: str, platforms: list,
         location,
         json.dumps(platforms),
         json.dumps(config or {}),
-        'pending'
+        'pending',
+        user_id
     ))
     task_db_id = cursor.lastrowid
     conn.commit()
@@ -35,7 +36,8 @@ def update_search_task(task_id: str, **kwargs) -> bool:
     """更新搜索任务字段"""
     allowed = {'task_name', 'status', 'total_targets', 'found_count', 'imported_count',
                'ai_enriched_count', 'pre_filtered_count', 'crawl_rejected_count',
-               'ai_skipped_count', 'config_json', 'error_message', 'started_at', 'completed_at'}
+               'ai_skipped_count', 'config_json', 'error_message', 'started_at', 'completed_at',
+               'expanded_keywords', 'user_id'}
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return False
@@ -51,11 +53,14 @@ def update_search_task(task_id: str, **kwargs) -> bool:
     return cursor.rowcount > 0
 
 
-def get_search_task(task_id: str) -> Optional[dict]:
+def get_search_task(task_id: str, user_id: int = None, admin: bool = False) -> Optional[dict]:
     """获取单个任务详情"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM search_tasks WHERE task_id = ?', (task_id,))
+    if not admin and user_id:
+        cursor.execute('SELECT * FROM search_tasks WHERE task_id = ? AND (user_id = ? OR user_id IS NULL)', (task_id, user_id))
+    else:
+        cursor.execute('SELECT * FROM search_tasks WHERE task_id = ?', (task_id,))
     row = cursor.fetchone()
     conn.close()
     if not row:
@@ -63,16 +68,21 @@ def get_search_task(task_id: str) -> Optional[dict]:
     return _task_row_to_dict(row)
 
 
-def get_search_tasks(status: str = None, page: int = 1, per_page: int = 20) -> dict:
+def get_search_tasks(status: str = None, page: int = 1, per_page: int = 20, user_id: int = None, admin: bool = False) -> dict:
     """获取任务列表（分页）"""
     conn = get_connection()
     cursor = conn.cursor()
 
-    where_clause = ''
+    conditions = []
     params = []
     if status:
-        where_clause = 'WHERE status = ?'
-        params = [status]
+        conditions.append('status = ?')
+        params.append(status)
+    if not admin and user_id:
+        conditions.append('(user_id = ? OR user_id IS NULL)')
+        params.append(user_id)
+
+    where_clause = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
 
     # 总数
     cursor.execute(f'SELECT COUNT(*) FROM search_tasks {where_clause}', params)
@@ -96,11 +106,14 @@ def get_search_tasks(status: str = None, page: int = 1, per_page: int = 20) -> d
     }
 
 
-def delete_search_task(task_id: str) -> bool:
+def delete_search_task(task_id: str, user_id: int = None, admin: bool = False) -> bool:
     """删除任务（级联删除结果由外键处理）"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM search_tasks WHERE task_id = ?', (task_id,))
+    if not admin and user_id:
+        cursor.execute('DELETE FROM search_tasks WHERE task_id = ? AND user_id = ?', (task_id, user_id))
+    else:
+        cursor.execute('DELETE FROM search_tasks WHERE task_id = ?', (task_id,))
     conn.commit()
     conn.close()
     return cursor.rowcount > 0
@@ -120,7 +133,8 @@ def save_search_result(task_id: str, platform: str, source_url: str, raw_data: d
                        pre_crawl_score: float = None,
                        crawl_validation_passed: bool = False,
                        probe_title: str = '',
-                       probe_description: str = '') -> int:
+                       probe_description: str = '',
+                       user_id: int = None) -> int:
     """保存单条搜索结果，返回结果DB ID"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -131,8 +145,8 @@ def save_search_result(task_id: str, platform: str, source_url: str, raw_data: d
             industry_type, business_model, confidence_score, ai_analysis_json,
             search_keyword, search_location, emails_json,
             validation_status, validation_reason, pre_crawl_score,
-            crawl_validation_passed, probe_title, probe_description
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            crawl_validation_passed, probe_title, probe_description, user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         task_id, platform, source_url, json.dumps(raw_data),
         company_name, website, country, address, phone, email,
@@ -142,7 +156,7 @@ def save_search_result(task_id: str, platform: str, source_url: str, raw_data: d
         json.dumps(emails_json) if emails_json else None,
         validation_status, validation_reason, pre_crawl_score,
         1 if crawl_validation_passed else 0,
-        probe_title, probe_description
+        probe_title, probe_description, user_id
     ))
     result_id = cursor.lastrowid
     conn.commit()
@@ -151,7 +165,8 @@ def save_search_result(task_id: str, platform: str, source_url: str, raw_data: d
 
 
 def get_search_results(task_id: str = None, status: str = None, platform: str = None,
-                       search_keyword: str = None, page: int = 1, per_page: int = 20) -> dict:
+                       search_keyword: str = None, page: int = 1, per_page: int = 20,
+                       user_id: int = None, admin: bool = False) -> dict:
     """获取搜索结果列表（分页+筛选）"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -170,6 +185,9 @@ def get_search_results(task_id: str = None, status: str = None, platform: str = 
     if search_keyword:
         conditions.append('company_name LIKE ?')
         params.append(f'%{search_keyword}%')
+    if not admin and user_id:
+        conditions.append('(user_id = ? OR user_id IS NULL)')
+        params.append(user_id)
 
     where_clause = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
 
@@ -195,11 +213,14 @@ def get_search_results(task_id: str = None, status: str = None, platform: str = 
     }
 
 
-def get_search_result(result_id: int) -> Optional[dict]:
+def get_search_result(result_id: int, user_id: int = None, admin: bool = False) -> Optional[dict]:
     """获取单条结果详情"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM search_results WHERE id = ?', (result_id,))
+    if not admin and user_id:
+        cursor.execute('SELECT * FROM search_results WHERE id = ? AND (user_id = ? OR user_id IS NULL)', (result_id, user_id))
+    else:
+        cursor.execute('SELECT * FROM search_results WHERE id = ?', (result_id,))
     row = cursor.fetchone()
     conn.close()
     if not row:
@@ -207,22 +228,24 @@ def get_search_result(result_id: int) -> Optional[dict]:
     return _result_row_to_dict(row)
 
 
-def update_result_import_status(result_id: int, status: str, customer_id: int = None) -> bool:
+def update_result_import_status(result_id: int, status: str, customer_id: int = None, user_id: int = None, admin: bool = False) -> bool:
     """更新结果导入状态"""
     conn = get_connection()
     cursor = conn.cursor()
+    user_where = ' AND user_id = ?' if (not admin and user_id) else ''
+    user_params = [user_id] if (not admin and user_id) else []
     if customer_id is not None:
-        cursor.execute('''
+        cursor.execute(f'''
             UPDATE search_results
             SET import_status = ?, imported_customer_id = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (status, customer_id, result_id))
+            WHERE id = ?{user_where}
+        ''', (status, customer_id, result_id) + tuple(user_params))
     else:
-        cursor.execute('''
+        cursor.execute(f'''
             UPDATE search_results
             SET import_status = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (status, result_id))
+            WHERE id = ?{user_where}
+        ''', (status, result_id) + tuple(user_params))
     conn.commit()
     conn.close()
     return cursor.rowcount > 0
@@ -250,18 +273,25 @@ def update_result_emails(result_id: int, emails_json: list = None, email: str = 
     return cursor.rowcount > 0
 
 
-def bulk_update_result_status(result_ids: List[int], status: str) -> int:
+def bulk_update_result_status(result_ids: List[int], status: str, user_id: int = None, admin: bool = False) -> int:
     """批量更新结果状态，返回更新数量"""
     if not result_ids:
         return 0
     conn = get_connection()
     cursor = conn.cursor()
     placeholders = ','.join('?' * len(result_ids))
-    cursor.execute(f'''
-        UPDATE search_results
-        SET import_status = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id IN ({placeholders})
-    ''', [status] + result_ids)
+    if not admin and user_id:
+        cursor.execute(f'''
+            UPDATE search_results
+            SET import_status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id IN ({placeholders}) AND user_id = ?
+        ''', [status] + result_ids + [user_id])
+    else:
+        cursor.execute(f'''
+            UPDATE search_results
+            SET import_status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id IN ({placeholders})
+        ''', [status] + result_ids)
     conn.commit()
     updated = cursor.rowcount
     conn.close()
@@ -327,7 +357,7 @@ def update_platform_config(platform: str, **kwargs) -> bool:
 
 # ==================== Import to CRM ====================
 
-def import_result_to_customer(result_id: int, import_options: dict = None) -> dict:
+def import_result_to_customer(result_id: int, import_options: dict = None, user_id: int = None) -> dict:
     """
     将单条搜索结果导入到customers/emails/contacts表
     返回 {'success': bool, 'customer_id': int or None, 'reason': str}
@@ -361,8 +391,8 @@ def import_result_to_customer(result_id: int, import_options: dict = None) -> di
     cursor.execute('''
         INSERT INTO customers (
             customer_name, country, address, website, company_info,
-            industry_type, source_channel, source_task_id, source_platform
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            industry_type, source_channel, source_task_id, source_platform, user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         result.get('company_name', 'Unknown Company'),
         result.get('country', default_country),
@@ -372,7 +402,8 @@ def import_result_to_customer(result_id: int, import_options: dict = None) -> di
         result.get('industry_type', ''),
         'ai_search',
         result.get('task_id', ''),
-        result.get('platform', '')
+        result.get('platform', ''),
+        user_id
     ))
     customer_id = cursor.lastrowid
 
@@ -437,6 +468,7 @@ def _task_row_to_dict(row) -> dict:
         'pre_filtered_count': row[17] if row[17] is not None else 0,
         'crawl_rejected_count': row[18] if row[18] is not None else 0,
         'ai_skipped_count': row[19] if row[19] is not None else 0,
+        'expanded_keywords': row[20] if len(row) > 20 else None,
     }
 
 
@@ -496,13 +528,13 @@ def _platform_row_to_dict(row) -> dict:
 
 # ============ 拉黑公司管理 ============
 
-def add_blacklist(company_name: str, website: str = '', reason: str = '') -> bool:
+def add_blacklist(company_name: str, website: str = '', reason: str = '', user_id: int = None) -> bool:
     """拉黑公司"""
     conn = get_connection()
     try:
         conn.execute(
-            'INSERT OR IGNORE INTO blacklisted_companies (company_name, website, reason) VALUES (?, ?, ?)',
-            (company_name, website, reason)
+            'INSERT OR IGNORE INTO blacklisted_companies (company_name, website, reason, user_id) VALUES (?, ?, ?, ?)',
+            (company_name, website, reason, user_id)
         )
         conn.commit()
         return True
@@ -512,14 +544,20 @@ def add_blacklist(company_name: str, website: str = '', reason: str = '') -> boo
         conn.close()
 
 
-def remove_blacklist(company_name: str, website: str = '') -> bool:
+def remove_blacklist(company_name: str, website: str = '', user_id: int = None, admin: bool = False) -> bool:
     """取消拉黑"""
     conn = get_connection()
     try:
-        conn.execute(
-            'DELETE FROM blacklisted_companies WHERE company_name = ? AND (website = ? OR website = \'\')',
-            (company_name, website)
-        )
+        if not admin and user_id:
+            conn.execute(
+                'DELETE FROM blacklisted_companies WHERE company_name = ? AND (website = ? OR website = \'\') AND (user_id = ? OR user_id IS NULL)',
+                (company_name, website, user_id)
+            )
+        else:
+            conn.execute(
+                'DELETE FROM blacklisted_companies WHERE company_name = ? AND (website = ? OR website = \'\')',
+                (company_name, website)
+            )
         conn.commit()
         return True
     except Exception:
@@ -528,23 +566,28 @@ def remove_blacklist(company_name: str, website: str = '') -> bool:
         conn.close()
 
 
-def is_blacklisted(company_name: str = '', website: str = '') -> bool:
+def is_blacklisted(company_name: str = '', website: str = '', user_id: int = None, admin: bool = False) -> bool:
     """检查是否在拉黑列表中"""
     conn = get_connection()
     try:
+        user_where = ''
+        user_params = []
+        if not admin and user_id:
+            user_where = ' AND (user_id = ? OR user_id IS NULL)'
+            user_params = [user_id]
         # 按域名精确匹配
         if website:
             row = conn.execute(
-                'SELECT 1 FROM blacklisted_companies WHERE website = ? AND website != \'\' LIMIT 1',
-                (website,)
+                f'SELECT 1 FROM blacklisted_companies WHERE website = ? AND website != \'\'{user_where} LIMIT 1',
+                (website,) + tuple(user_params)
             ).fetchone()
             if row:
                 return True
         # 按公司名匹配（忽略大小写）
         if company_name:
             row = conn.execute(
-                'SELECT 1 FROM blacklisted_companies WHERE LOWER(company_name) = LOWER(?) LIMIT 1',
-                (company_name,)
+                f'SELECT 1 FROM blacklisted_companies WHERE LOWER(company_name) = LOWER(?){user_where} LIMIT 1',
+                (company_name,) + tuple(user_params)
             ).fetchone()
             if row:
                 return True
@@ -573,14 +616,19 @@ def get_blacklisted_names() -> set:
         conn.close()
 
 
-def get_blacklist(page: int = 1, per_page: int = 20) -> dict:
+def get_blacklist(page: int = 1, per_page: int = 20, user_id: int = None, admin: bool = False) -> dict:
     """获取拉黑列表（分页）"""
     conn = get_connection()
     try:
-        total = conn.execute('SELECT COUNT(*) FROM blacklisted_companies').fetchone()[0]
+        user_where = ''
+        user_params = []
+        if not admin and user_id:
+            user_where = ' WHERE (user_id = ? OR user_id IS NULL)'
+            user_params = [user_id]
+        total = conn.execute(f'SELECT COUNT(*) FROM blacklisted_companies{user_where}', user_params).fetchone()[0]
         rows = conn.execute(
-            'SELECT id, company_name, website, reason, created_at FROM blacklisted_companies ORDER BY created_at DESC LIMIT ? OFFSET ?',
-            (per_page, (page - 1) * per_page)
+            f'SELECT id, company_name, website, reason, created_at FROM blacklisted_companies{user_where} ORDER BY created_at DESC LIMIT ? OFFSET ?',
+            user_params + [per_page, (page - 1) * per_page]
         ).fetchall()
         items = [{
             'id': r[0], 'company_name': r[1], 'website': r[2] or '',

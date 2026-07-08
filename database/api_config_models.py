@@ -6,14 +6,20 @@ import json
 from database.connection import get_connection
 
 
-def get_all_api_configs():
+def get_all_api_configs(user_id: int = None, admin: bool = False):
     """获取所有 API 配置"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        SELECT id, api_name, api_key, base_url, model, extra_config, is_active, created_at, updated_at
-        FROM api_configs ORDER BY id DESC
-    ''')
+    if not admin and user_id:
+        cursor.execute('''
+            SELECT id, api_name, api_key, base_url, model, extra_config, is_active, created_at, updated_at
+            FROM api_configs WHERE (user_id = ? OR user_id IS NULL) ORDER BY id DESC
+        ''', (user_id,))
+    else:
+        cursor.execute('''
+            SELECT id, api_name, api_key, base_url, model, extra_config, is_active, created_at, updated_at
+            FROM api_configs ORDER BY id DESC
+        ''')
     rows = cursor.fetchall()
     conn.close()
     return [{
@@ -29,14 +35,20 @@ def get_all_api_configs():
     } for r in rows]
 
 
-def get_api_config(api_name: str):
+def get_api_config(api_name: str, user_id: int = None, admin: bool = False):
     """根据名称获取 API 配置"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        SELECT id, api_name, api_key, base_url, model, extra_config, is_active
-        FROM api_configs WHERE api_name = ? AND is_active = 1
-    ''', (api_name,))
+    if not admin and user_id:
+        cursor.execute('''
+            SELECT id, api_name, api_key, base_url, model, extra_config, is_active
+            FROM api_configs WHERE api_name = ? AND is_active = 1 AND (user_id = ? OR user_id IS NULL)
+        ''', (api_name, user_id))
+    else:
+        cursor.execute('''
+            SELECT id, api_name, api_key, base_url, model, extra_config, is_active
+            FROM api_configs WHERE api_name = ? AND is_active = 1
+        ''', (api_name,))
     row = cursor.fetchone()
     conn.close()
     if not row:
@@ -59,16 +71,16 @@ def get_api_key(api_name: str) -> str:
 
 
 def create_api_config(api_name: str, api_key: str, base_url: str = '',
-                      model: str = '', extra_config: dict = None) -> bool:
+                      model: str = '', extra_config: dict = None, user_id: int = None) -> bool:
     """创建 API 配置"""
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            INSERT INTO api_configs (api_name, api_key, base_url, model, extra_config)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO api_configs (api_name, api_key, base_url, model, extra_config, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (api_name, api_key, base_url, model,
-              json.dumps(extra_config) if extra_config else None))
+              json.dumps(extra_config) if extra_config else None, user_id))
         conn.commit()
         return True
     except Exception as e:
@@ -80,7 +92,7 @@ def create_api_config(api_name: str, api_key: str, base_url: str = '',
 
 def update_api_config(api_name: str, api_key: str = None, base_url: str = None,
                       model: str = None, extra_config: dict = None,
-                      is_active: bool = None) -> bool:
+                      is_active: bool = None, user_id: int = None, admin: bool = False) -> bool:
     """更新 API 配置"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -105,17 +117,24 @@ def update_api_config(api_name: str, api_key: str = None, base_url: str = None,
         conn.close()
         return False
     params.append(api_name)
-    cursor.execute(f"UPDATE api_configs SET {', '.join(sets)} WHERE api_name = ?", params)
+    where_extra = ""
+    if not admin and user_id:
+        where_extra = " AND (user_id = ? OR user_id IS NULL)"
+        params.append(user_id)
+    cursor.execute(f"UPDATE api_configs SET {', '.join(sets)} WHERE api_name = ?{where_extra}", params)
     conn.commit()
     conn.close()
     return cursor.rowcount > 0
 
 
-def delete_api_config(api_name: str) -> bool:
+def delete_api_config(api_name: str, user_id: int = None, admin: bool = False) -> bool:
     """删除 API 配置"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM api_configs WHERE api_name = ?', (api_name,))
+    if not admin and user_id:
+        cursor.execute('DELETE FROM api_configs WHERE api_name = ? AND (user_id = ? OR user_id IS NULL)', (api_name, user_id))
+    else:
+        cursor.execute('DELETE FROM api_configs WHERE api_name = ?', (api_name,))
     conn.commit()
     conn.close()
     return cursor.rowcount > 0

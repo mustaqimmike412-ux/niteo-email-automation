@@ -32,11 +32,11 @@ def get_material(material_key):
     return MATERIAL_LIBRARY.get(material_key)
 
 
-def get_material_library():
-    """获取完整素材库"""
+def get_material_library(user_id: int = None, admin: bool = False):
+    """获取完整素材库（支持 user_id 隔离）"""
     try:
         from database.material_models import get_material_library_db
-        result = get_material_library_db()
+        result = get_material_library_db(user_id=user_id, admin=admin)
         if result:
             return result
     except Exception:

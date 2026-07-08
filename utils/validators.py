@@ -93,7 +93,7 @@ def validate_text_length(text, max_length, field_name="文本"):
     return True, None
 
 
-def check_duplicate_customer_name(name, exclude_id=None):
+def check_duplicate_customer_name(name, exclude_id=None, user_id=None):
     """
     检查客户名是否已存在（不区分大小写）
     返回: (is_duplicate: bool, existing_id: int or None)
@@ -102,15 +102,27 @@ def check_duplicate_customer_name(name, exclude_id=None):
     cursor = conn.cursor()
 
     if exclude_id:
-        cursor.execute(
-            "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?) AND id != ?",
-            (name.strip(), exclude_id)
-        )
+        if user_id:
+            cursor.execute(
+                "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?) AND id != ? AND (user_id = ? OR user_id IS NULL)",
+                (name.strip(), exclude_id, user_id)
+            )
+        else:
+            cursor.execute(
+                "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?) AND id != ?",
+                (name.strip(), exclude_id)
+            )
     else:
-        cursor.execute(
-            "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?)",
-            (name.strip(),)
-        )
+        if user_id:
+            cursor.execute(
+                "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?) AND (user_id = ? OR user_id IS NULL)",
+                (name.strip(), user_id)
+            )
+        else:
+            cursor.execute(
+                "SELECT id FROM customers WHERE LOWER(customer_name) = LOWER(?)",
+                (name.strip(),)
+            )
 
     row = cursor.fetchone()
     conn.close()
@@ -120,7 +132,7 @@ def check_duplicate_customer_name(name, exclude_id=None):
     return False, None
 
 
-def check_duplicate_email(email, customer_id=None):
+def check_duplicate_email(email, customer_id=None, user_id=None):
     """
     检查邮箱是否已存在
     如果指定了customer_id，则只检查该客户下的邮箱
@@ -130,15 +142,27 @@ def check_duplicate_email(email, customer_id=None):
     cursor = conn.cursor()
 
     if customer_id:
-        cursor.execute(
-            "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?) AND customer_id = ?",
-            (email.strip().lower(), customer_id)
-        )
+        if user_id:
+            cursor.execute(
+                "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?) AND customer_id = ? AND (user_id = ? OR user_id IS NULL)",
+                (email.strip().lower(), customer_id, user_id)
+            )
+        else:
+            cursor.execute(
+                "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?) AND customer_id = ?",
+                (email.strip().lower(), customer_id)
+            )
     else:
-        cursor.execute(
-            "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?)",
-            (email.strip().lower(),)
-        )
+        if user_id:
+            cursor.execute(
+                "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?) AND (user_id = ? OR user_id IS NULL)",
+                (email.strip().lower(), user_id)
+            )
+        else:
+            cursor.execute(
+                "SELECT id, customer_id FROM emails WHERE LOWER(email_address) = LOWER(?)",
+                (email.strip().lower(),)
+            )
 
     row = cursor.fetchone()
     conn.close()
@@ -229,7 +253,7 @@ def validate_website(url):
     return True, None
 
 
-def validate_customer_data(data, is_update=False, customer_id=None):
+def validate_customer_data(data, is_update=False, customer_id=None, user_id=None):
     """
     验证客户数据（用于添加/更新）
     返回: (is_valid: bool, errors: dict)
@@ -244,7 +268,7 @@ def validate_customer_data(data, is_update=False, customer_id=None):
             errors['customer_name'] = msg
         else:
             # 检查重复
-            is_dup, dup_id = check_duplicate_customer_name(name, customer_id)
+            is_dup, dup_id = check_duplicate_customer_name(name, customer_id, user_id)
             if is_dup:
                 errors['customer_name'] = f"客户名称已存在 (ID: {dup_id})"
 
@@ -266,7 +290,8 @@ def validate_customer_data(data, is_update=False, customer_id=None):
                 # 检查重复
                 is_dup, dup_info = check_duplicate_email(
                     email,
-                    customer_id if is_update else None
+                    customer_id if is_update else None,
+                    user_id
                 )
                 if is_dup and (not is_update or dup_info['customer_id'] != customer_id):
                     email_errors.append(f"邮箱[{i+1}]: {email} 已存在")
