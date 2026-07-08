@@ -1610,6 +1610,17 @@
                                         <div class="info-row"><span class="k">客户</span><span class="v" id="send-cust-name">-</span></div>
                                         <div class="info-row"><span class="k">已选邮箱</span><span class="v" id="send-cust-emails">-</span></div>
                                     </div>
+                                    <!-- 发信人选择器 -->
+                                    <div style="margin-bottom:16px;padding:14px;background:var(--bg);border-radius:12px;border:1px solid var(--surface-2)">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                                            <label style="font-size:0.85rem;color:var(--text-2);font-weight:600">📝 发信人</label>
+                                            <span id="sender-selector-status" style="font-size:0.78rem;color:var(--text-3)">默认</span>
+                                        </div>
+                                        <select id="sender-material-select" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;background:var(--surface)" onchange="onSenderMaterialChange()">
+                                            <option value="">使用默认发信人</option>
+                                        </select>
+                                        <div id="sender-material-preview" style="margin-top:8px;font-size:0.78rem;color:var(--text-3);display:none"></div>
+                                    </div>
                                     <!-- 资料选择器 -->
                                     <div style="margin-bottom:16px;padding:14px;background:var(--bg);border-radius:12px;border:1px solid var(--surface-2)">
                                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -1893,17 +1904,17 @@
                     </div>
                 </div>
 
-                <!-- 发信人信息卡片 -->
+                <!-- 发信人模板卡片 -->
                 <div class="card" id="sender-info-panel" style="margin-bottom:20px;border:1.5px solid rgba(74,125,228,0.15);background:linear-gradient(135deg,rgba(74,125,228,0.03),rgba(102,126,234,0.03))">
                     <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
                         <div style="display:flex;align-items:center;gap:12px">
                             <div style="width:40px;height:40px;border-radius:12px;background:rgba(74,125,228,0.1);display:flex;align-items:center;justify-content:center;font-size:20px">📝</div>
                             <div>
-                                <h3 style="font-size:1rem;font-weight:600">发信人信息</h3>
-                                <p style="font-size:0.78rem;color:var(--text-3);margin-top:2px">邮件签名与发件人资料配置</p>
+                                <h3 style="font-size:1rem;font-weight:600">发信人模板</h3>
+                                <p style="font-size:0.78rem;color:var(--text-3);margin-top:2px">可创建多个发信人，发邮件前自由切换</p>
                             </div>
                         </div>
-                        <button class="btn btn-accent btn-sm" onclick="openSenderInfoModal()">编辑资料</button>
+                        <button class="btn btn-accent btn-sm" onclick="openSenderInfoModal(null)">+ 添加模板</button>
                     </div>
                     <div class="card-body" id="sender-info-card-body" style="padding:16px 22px">
                         <div style="font-size:0.85rem;color:var(--text-3)">加载中...</div>
@@ -4054,30 +4065,36 @@
 
     async function loadSenderInfoCard() {
         try {
-            const data = await api('/api/materials/sender-info');
+            const data = await api('/api/materials/sender-info/list');
             const container = document.getElementById('sender-info-card-body');
-            if (!data || !data.data) {
-                container.innerHTML = '<div style="color:var(--text-3)">未配置发信人信息</div>';
+            if (!data || !data.data || data.data.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-3)">未配置发信人模板，点击右上角"添加模板"创建</div>';
                 return;
             }
-            const s = data.data;
-            container.innerHTML = `
-                <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
-                    <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#4a7de4,#667eea);display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.4rem;font-weight:600">${esc(s.sender_name?.charAt(0) || 'S')}</div>
-                    <div>
-                        <div style="font-size:1rem;font-weight:600">${esc(s.sender_name || '-')}</div>
-                        <div style="font-size:0.82rem;color:var(--text-2);margin-top:2px">${esc(s.job_title || '')} · ${esc(s.company_name || '')}</div>
-                        <div style="font-size:0.78rem;color:var(--text-3);margin-top:2px">${esc(s.sender_email || '')}</div>
+            container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px">${data.data.map(s => `
+                <div style="flex:1;min-width:260px;max-width:400px;padding:14px 16px;background:var(--surface);border-radius:12px;border:1.5px solid var(--border);position:relative">
+                    <div style="display:flex;gap:12px;align-items:flex-start">
+                        <div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#4a7de4,#667eea);display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.2rem;font-weight:600;flex-shrink:0">${esc(s.sender_name?.charAt(0) || 'S')}</div>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:0.95rem;font-weight:600">${esc(s.sender_name || '-')}</div>
+                            <div style="font-size:0.78rem;color:var(--text-2);margin-top:2px">${esc(s.job_title || '')} · ${esc(s.company_name || '')}</div>
+                            <div style="font-size:0.75rem;color:var(--text-3);margin-top:2px">${esc(s.sender_email || '')}</div>
+                            <div style="margin-top:8px;padding:8px 10px;background:var(--bg);border-radius:6px;border:1px solid var(--border);font-size:0.78rem;color:var(--text-2);white-space:pre-line;line-height:1.5;max-height:80px;overflow-y:auto">${esc(s.signature || '')}</div>
+                        </div>
                     </div>
-                    <div style="flex:1;min-width:200px;padding:10px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border);font-size:0.82rem;color:var(--text-2);white-space:pre-line;line-height:1.6">${esc(s.signature || '')}</div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+                        <button class="btn btn-ghost btn-sm" style="padding:4px 10px;font-size:0.75rem" onclick="openSenderInfoModal(${s.id})">编辑</button>
+                        <button class="btn btn-sm" style="padding:4px 10px;font-size:0.75rem;color:var(--danger);background:none;border:1px solid var(--danger)" onclick="deleteSenderInfo(${s.id})">删除</button>
+                    </div>
                 </div>
-            `;
+            `).join('')}</div>`;
         } catch (e) {
-            console.error('加载发信人信息失败', e);
+            console.error('加载发信人模板失败', e);
         }
     }
 
-    function openSenderInfoModal() {
+    function openSenderInfoModal(materialId) {
+        window._currentSenderMaterialId = materialId;
         let overlay = document.getElementById('modal-sender-info-overlay');
         if (!overlay) {
             overlay = document.createElement('div');
@@ -4086,7 +4103,7 @@
             overlay.innerHTML = `
                 <div class="modal" style="max-width:560px;max-height:90vh;overflow-y:auto">
                     <div class="modal-head">
-                        <h3>📝 编辑发信人信息</h3>
+                        <h3 id="si-modal-title">📝 添加发信人模板</h3>
                         <button class="modal-close" onclick="closeSenderInfoModal()">✕</button>
                     </div>
                     <div class="modal-body">
@@ -4125,18 +4142,33 @@
             `;
             document.body.appendChild(overlay);
         }
-        // 加载现有数据
-        api('/api/materials/sender-info').then(data => {
-            if (data && data.data) {
-                const s = data.data;
-                document.getElementById('si-name').value = s.sender_name || '';
-                document.getElementById('si-title').value = s.job_title || '';
-                document.getElementById('si-company').value = s.company_name || '';
-                document.getElementById('si-website').value = s.company_website || '';
-                document.getElementById('si-email').value = s.sender_email || '';
-                document.getElementById('si-signature').value = s.signature || '';
-            }
-        });
+        // 重置表单
+        document.getElementById('si-name').value = '';
+        document.getElementById('si-title').value = '';
+        document.getElementById('si-company').value = '';
+        document.getElementById('si-website').value = '';
+        document.getElementById('si-email').value = '';
+        document.getElementById('si-signature').value = '';
+
+        if (materialId) {
+            document.getElementById('si-modal-title').textContent = '📝 编辑发信人模板';
+            // 加载现有数据 - 从列表中找到对应项
+            api('/api/materials/sender-info/list').then(data => {
+                if (data && data.data) {
+                    const s = data.data.find(x => x.id === materialId);
+                    if (s) {
+                        document.getElementById('si-name').value = s.sender_name || '';
+                        document.getElementById('si-title').value = s.job_title || '';
+                        document.getElementById('si-company').value = s.company_name || '';
+                        document.getElementById('si-website').value = s.company_website || '';
+                        document.getElementById('si-email').value = s.sender_email || '';
+                        document.getElementById('si-signature').value = s.signature || '';
+                    }
+                }
+            });
+        } else {
+            document.getElementById('si-modal-title').textContent = '📝 添加发信人模板';
+        }
         overlay.style.display = 'flex';
     }
 
@@ -4154,6 +4186,9 @@
             sender_email: document.getElementById('si-email').value.trim(),
             signature: document.getElementById('si-signature').value.trim()
         };
+        if (window._currentSenderMaterialId) {
+            payload.material_id = window._currentSenderMaterialId;
+        }
         if (!payload.sender_name) {
             toast('发信人姓名不能为空', 'err');
             return;
@@ -4165,7 +4200,7 @@
                 body: JSON.stringify(payload)
             });
             if (res && res.success) {
-                toast('发信人信息保存成功');
+                toast(window._currentSenderMaterialId ? '发信人模板已更新' : '发信人模板已创建');
                 closeSenderInfoModal();
                 loadSenderInfoCard();
             } else {
@@ -4173,6 +4208,21 @@
             }
         } catch (e) {
             toast('保存失败', 'err');
+        }
+    }
+
+    async function deleteSenderInfo(materialId) {
+        if (!confirm('确定要删除这个发信人模板吗？')) return;
+        try {
+            const res = await api(`/api/materials/${materialId}`, { method: 'DELETE' });
+            if (res && res.success) {
+                toast('已删除');
+                loadSenderInfoCard();
+            } else {
+                toast(res.error || '删除失败', 'err');
+            }
+        } catch (e) {
+            toast('删除失败', 'err');
         }
     }
 
@@ -6068,7 +6118,41 @@
         return hours + ' 小时 ' + mins + ' 分';
     }
 
+    async function loadSenderMaterialOptions() {
+        const data = await api('/api/materials/sender-info/list');
+        const select = document.getElementById('sender-material-select');
+        if (!data || !data.data || data.data.length === 0) {
+            select.innerHTML = '<option value="">使用默认发信人</option>';
+            return;
+        }
+        select.innerHTML = '<option value="">使用默认发信人</option>' +
+            data.data.map(s => `<option value="${s.id}">${esc(s.sender_name)} · ${esc(s.job_title || '')} · ${esc(s.company_name || '')}</option>`).join('');
+    }
+
+    function onSenderMaterialChange() {
+        const select = document.getElementById('sender-material-select');
+        const preview = document.getElementById('sender-material-preview');
+        const status = document.getElementById('sender-selector-status');
+        const val = select.value;
+        if (val) {
+            const text = select.options[select.selectedIndex].text;
+            preview.textContent = text;
+            preview.style.display = 'block';
+            status.textContent = '已选择';
+        } else {
+            preview.style.display = 'none';
+            status.textContent = '默认';
+        }
+    }
+
+    function getSelectedSenderMaterialId() {
+        const select = document.getElementById('sender-material-select');
+        return select ? parseInt(select.value) || null : null;
+    }
+
     async function loadSendPageMaterials() {
+        // 同时加载发信人选项
+        loadSenderMaterialOptions();
         const data = await api('/api/materials/selector');
         const container = document.getElementById('send-material-list');
         const empty = document.getElementById('send-material-empty');
@@ -6520,7 +6604,7 @@
         const res = await api('/api/email/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ customer_id: selectedCustomerId, target_word_count: targetWordCount, selected_material_ids: selectedMaterialIds })
+            body: JSON.stringify({ customer_id: selectedCustomerId, target_word_count: targetWordCount, selected_material_ids: selectedMaterialIds, sender_material_id: getSelectedSenderMaterialId() })
         });
 
         if (!res || !res.task_id) {
@@ -6700,6 +6784,7 @@
                 email_addresses: selectedEmails.map(e => e.address),
                 target_word_count: targetWordCount,
                 selected_material_ids: selectedMaterialIds,
+                sender_material_id: getSelectedSenderMaterialId(),
                 ...sendConfig
             })
         });
@@ -6782,7 +6867,8 @@
                     task_type: 'batch',
                     email_ids: emailIds,
                     send_config: sendConfig,
-                    selected_material_ids: selectedMaterialIds
+                    selected_material_ids: selectedMaterialIds,
+                    sender_material_id: getSelectedSenderMaterialId()
                 })
             });
             if (data && data.task_id) {

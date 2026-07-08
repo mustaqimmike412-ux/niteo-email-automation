@@ -64,7 +64,7 @@ queue_manager = SendQueueManager(sender=_sender)
 orchestrator = SendOrchestrator(
     sender=_sender,
     queue_manager=queue_manager,
-    workflow=EmailWorkflow(),
+    workflow=EmailWorkflow(user_id=None),
     subject_manager_instance=SmartSubjectManager()
 )
 scheduler_instance = EmailScheduler(task_trigger_callback=orchestrator.create_send_task)
@@ -1686,6 +1686,7 @@ def api_create_send_task():
         }
         target_word_count = data.get('target_word_count')
         selected_material_ids = data.get('selected_material_ids')
+        sender_material_id = data.get('sender_material_id')
 
         # 检查是否有相同 email_ids 的任务正在运行
         email_ids_set = frozenset(email_ids) if email_ids else frozenset()
@@ -1754,6 +1755,7 @@ def api_create_send_task():
                 'send_config': send_config,
                 'email_ids_set': email_ids_set,
                 'selected_material_ids': selected_material_ids,
+                'sender_material_id': sender_material_id,
                 'created_at': time.time()
             }
 
@@ -1789,7 +1791,8 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None)
         from generators.workflow import EmailWorkflow
         sender = EmailSender()
         current_user_id = get_current_user_id()
-        workflow = EmailWorkflow(user_id=current_user_id)
+        sender_material_id = task.get('sender_material_id') if task else None
+        workflow = EmailWorkflow(user_id=current_user_id, sender_material_id=sender_material_id)
 
         # 按客户分组
         from collections import defaultdict
@@ -2610,6 +2613,7 @@ def api_send_test():
         email_addresses = data.get('email_addresses', [])
         target_word_count = data.get('target_word_count')
         selected_material_ids = data.get('selected_material_ids')
+        sender_material_id = data.get('sender_material_id')
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
@@ -2638,6 +2642,7 @@ def api_send_test():
                 'error': None,
                 'target_word_count': target_word_count,
                 'selected_material_ids': selected_material_ids,
+                'sender_material_id': sender_material_id,
                 'send_config': send_config,
                 'created_at': time.time()
             }
@@ -2739,7 +2744,8 @@ def _do_send_email(task_id, customer_id, email_addresses=None):
 
         sender = EmailSender()
         current_user_id = get_current_user_id()
-        workflow = EmailWorkflow(user_id=current_user_id)
+        sender_material_id = task.get('sender_material_id') if task else None
+        workflow = EmailWorkflow(user_id=current_user_id, sender_material_id=sender_material_id)
 
         # 确保客户有主题池
         sender.ensure_customer_subjects(customer_id)
@@ -2749,6 +2755,7 @@ def _do_send_email(task_id, customer_id, email_addresses=None):
             _update_task_step(task_id, step_id, status)
 
         selected_material_ids = task.get('selected_material_ids')
+        sender_material_id = task.get('sender_material_id')
         email_content = workflow.generate_email(
             customer_name, website or '',
             progress_callback=on_progress,
@@ -3039,6 +3046,7 @@ def api_email_preview():
         customer_id = data.get('customer_id')
         target_word_count = data.get('target_word_count')
         selected_material_ids = data.get('selected_material_ids')
+        sender_material_id = data.get('sender_material_id')
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
@@ -3059,6 +3067,7 @@ def api_email_preview():
                 'error': None,
                 'target_word_count': target_word_count,
                 'selected_material_ids': selected_material_ids,
+                'sender_material_id': sender_material_id,
                 'created_at': time.time()
             }
 
@@ -4051,6 +4060,20 @@ def api_material_content(material_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/materials/sender-info/list', methods=['GET'])
+@require_ajax
+def api_materials_sender_info_list():
+    """获取所有发信人模板列表"""
+    try:
+        from materials.sender_info_service import get_sender_info_list
+        current_user_id = get_current_user_id()
+        is_admin = getattr(g, 'user_role', None) == 'admin' or getattr(g, 'role', None) == 'admin'
+        data = get_sender_info_list(user_id=current_user_id, admin=is_admin)
+        return jsonify({'success': True, 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/materials/sender-info', methods=['GET', 'POST'])
 @require_ajax
 def api_materials_sender_info():
@@ -4072,10 +4095,11 @@ def api_materials_sender_info():
         if not data.get('sender_name'):
             return jsonify({'success': False, 'error': '发信人姓名不能为空'}), 400
 
-        material_id = save_sender_info(data, user_id=current_user_id)
+        material_id = data.get('material_id')
+        saved_id = save_sender_info(data, user_id=current_user_id, material_id=material_id)
         return jsonify({
             'success': True,
-            'material_id': material_id,
+            'material_id': saved_id,
             'message': '发信人信息已保存'
         })
     except Exception as e:

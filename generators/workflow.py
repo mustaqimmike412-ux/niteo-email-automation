@@ -596,11 +596,20 @@ class MaterialMatcher:
 class EmailComposer:
     """节点6: 开发信生成 - 整合信息生成高精准度英文开发信"""
     
-    def __init__(self, user_id: int = None):
-        """初始化邮件撰写器，支持 per-user 发信人信息"""
-        from materials.sender_info_service import get_sender_info
-        self.sender_info = get_sender_info(user_id=user_id)
-    
+    def __init__(self, user_id: int = None, sender_material_id: int = None):
+        """初始化邮件撰写器，支持 per-user 发信人信息和指定发信人模板"""
+        if sender_material_id:
+            from materials.sender_info_service import get_sender_info_by_id
+            sender = get_sender_info_by_id(sender_material_id, user_id=user_id)
+            if sender:
+                self.sender_info = sender
+            else:
+                from materials.sender_info_service import get_sender_info
+                self.sender_info = get_sender_info(user_id=user_id)
+        else:
+            from materials.sender_info_service import get_sender_info
+            self.sender_info = get_sender_info(user_id=user_id)
+
     def _load_sender_info(self) -> Dict:
         """加载发件人信息（兼容旧版）"""
         from materials.sender_info_service import get_sender_info
@@ -1152,14 +1161,15 @@ class EmailWorkflow:
     整合8个节点，提供一键生成开发信的功能
     """
     
-    def __init__(self, user_id: int = None):
+    def __init__(self, user_id: int = None, sender_material_id: int = None):
         self.user_id = user_id
+        self.sender_material_id = sender_material_id
         self.researcher = CompanyResearcher()
         self.classifier = CustomerClassifier()
         self.advantage_selector = AdvantageSelector()
         self.fabe_transformer = FABETransformer()
         self.material_matcher = MaterialMatcher()
-        self.composer = EmailComposer(user_id=user_id)
+        self.composer = EmailComposer(user_id=user_id, sender_material_id=sender_material_id)
         self.refiner = EmailRefiner()
         self.renderer = HTMLRenderer()
         self.llm = LLMEmailClient()
