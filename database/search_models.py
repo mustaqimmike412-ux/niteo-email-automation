@@ -164,6 +164,50 @@ def save_search_result(task_id: str, platform: str, source_url: str, raw_data: d
     return result_id
 
 
+def save_search_results_batch(results: list, conn=None) -> int:
+    """批量保存搜索结果，返回插入数量。支持传入外部连接以复用连接。"""
+    if not results:
+        return 0
+    should_close = conn is None
+    if conn is None:
+        conn = get_connection()
+    cursor = conn.cursor()
+    rows = []
+    for r in results:
+        rows.append((
+            r.get('task_id'), r.get('platform'), r.get('source_url'),
+            json.dumps(r.get('raw_data')) if r.get('raw_data') else None,
+            r.get('company_name'), r.get('website'), r.get('country'),
+            r.get('address'), r.get('phone'), r.get('email'),
+            r.get('industry_type'), r.get('business_model'),
+            r.get('confidence_score'),
+            json.dumps(r.get('ai_analysis')) if r.get('ai_analysis') else None,
+            r.get('search_keyword'), r.get('search_location'),
+            json.dumps(r.get('emails_json')) if r.get('emails_json') else None,
+            r.get('validation_status', 'pending'),
+            r.get('validation_reason', ''),
+            r.get('pre_crawl_score'),
+            1 if r.get('crawl_validation_passed') else 0,
+            r.get('probe_title', ''),
+            r.get('probe_description', ''),
+            r.get('user_id')
+        ))
+    cursor.executemany('''
+        INSERT INTO search_results (
+            task_id, platform, source_url, raw_data_json,
+            company_name, website, country, address, phone, email,
+            industry_type, business_model, confidence_score, ai_analysis_json,
+            search_keyword, search_location, emails_json,
+            validation_status, validation_reason, pre_crawl_score,
+            crawl_validation_passed, probe_title, probe_description, user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', rows)
+    conn.commit()
+    if should_close:
+        conn.close()
+    return len(rows)
+
+
 def get_search_results(task_id: str = None, status: str = None, platform: str = None,
                        search_keyword: str = None, page: int = 1, per_page: int = 20,
                        user_id: int = None, admin: bool = False) -> dict:

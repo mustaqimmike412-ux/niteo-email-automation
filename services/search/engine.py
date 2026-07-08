@@ -1,12 +1,18 @@
 """
-搜索任务执行引擎
+搜索任务执行引擎（优化版）
 管理搜索任务的创建、执行、状态追踪
+关键优化：
+  - 搜索/爬取/AI分析均采用 ThreadPoolExecutor 并行化
+  - 数据库批量插入替代逐条插入
+  - 取消状态内存缓存减少 DB 往返
+  - 精简超时和延迟配置
 """
 import threading
 import time
 import uuid
 from typing import List, Dict, Optional
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.search.registry import SearcherRegistry
 from services.search.ai_enricher import SearchAIEnricher
@@ -16,8 +22,9 @@ from services.search.result_validator import ResultValidator
 from services.search.keyword_expander import KeywordExpander
 from database.search_models import (
     create_search_task, update_search_task, save_search_result,
-    get_search_task, import_result_to_customer
+    save_search_results_batch, get_search_task, import_result_to_customer
 )
+from database.connection import get_connection
 
 
 class SearchTaskEngine:
@@ -70,11 +77,21 @@ class SearchTaskEngine:
         thread.start()
         return task_id
 
+    def _is_task_cancelled(self, task_id: str, cache: dict) -> bool:
+        """内存缓存的取消状态检查，减少 DB 往返"""
+        if task_id in cache:
+            return cache[task_id]
+        task = get_search_task(task_id)
+        cancelled = task and task.get('status') == 'cancelled'
+        cache[task_id] = cancelled
+        return cancelled
+
     def _execute_search(self, task_id: str, query: str, location: str,
                         platforms: List[str], config: dict,
                         preset_queries: List[str] = None,
                         user_id: int = None):
-        """实际执行搜索任务"""
+        """实际执行搜索任务（并行优化版）"""
+        cancel_cache = {}
         max_results = config.get('max_results_per_platform', 20)
         enable_ai = config.get('enable_ai_enrich', True)
         enable_crawl = config.get('enable_website_crawl', True)
@@ -115,153 +132,139 @@ class SearchTaskEngine:
                         update_search_task(task_id, expanded_keywords=','.join(queries))
                         print(f"[SearchEngine] {task_id} 关键词拓展完成: {queries}")
 
-            # 计算预计目标数：用户设置的 max_results 是总量上限，不是每个关键词的上限
             total_targets = len(platforms) * max_results
             update_search_task(task_id, total_targets=total_targets)
 
-            # === 阶段1：收集 — 用所有关键词搜索，每个关键词获取更多候选 ===
-            raw_results = []  # 收集所有原始结果（未截断）
+            # ========== 阶段1：并行搜索 + 预验证 ==========
+            raw_results = []
+            search_jobs = []
             for platform in platforms:
                 for q in queries:
-                    # 检查是否超时
-                    if time.time() - start_time > max_duration:
-                        update_search_task(task_id, status='completed',
-                                           error_message='任务因超时而终止')
-                        break
+                    search_jobs.append((platform, q))
 
-                    # 检查任务状态
-                    task = get_search_task(task_id)
-                    if task and task.get('status') == 'cancelled':
-                        break
-
-                    try:
-                        searcher = self.registry.get_searcher(platform, config)
-                        if not searcher.is_available():
-                            print(f"[SearchEngine] {platform} 不可用，跳过")
-                            continue
-
-                        print(f"[SearchEngine] {task_id} 搜索 {platform}: '{q}' in '{location}'")
-                        # 获取更多候选用于后续筛选（最多30个/关键词，避免过多）
-                        results = searcher.search(q, location, min(max_results * 3, 30))
-                        print(f"[SearchEngine] {platform} 找到 {len(results)} 条原始结果")
-                    except Exception as e:
-                        print(f"[SearchEngine] {platform} 搜索失败: {e}")
-                        continue
-
-                    # === 第一层漏斗：预爬取验证（Layer 1-5）===
-                    pre_filter_count = len(results)
+            def _do_search(job):
+                platform, q = job
+                if time.time() - start_time > max_duration:
+                    return []
+                try:
+                    searcher = self.registry.get_searcher(platform, config)
+                    if not searcher.is_available():
+                        return []
+                    results = searcher.search(q, location, min(max_results * 3, 30))
+                    # 预验证
+                    pre_count = len(results)
                     results = self.validator.run_pre_crawl_validation(results, query, location)
-                    filtered_count = pre_filter_count - len([r for r in results if r.validation_status != 'rejected'])
-                    print(f"[SearchEngine] {platform} 验证过滤: {pre_filter_count} → {len(results)} 条")
-
                     for r in results:
                         r.search_keyword = q
                         r.search_location = location
-                        raw_results.append(r)
+                    return results
+                except Exception as e:
+                    print(f"[SearchEngine] {platform} 搜索失败 ({q}): {e}")
+                    return []
 
-                    time.sleep(delay)
+            with ThreadPoolExecutor(max_workers=min(len(search_jobs), 5)) as pool:
+                futures = {pool.submit(_do_search, job): job for job in search_jobs}
+                for future in as_completed(futures):
+                    if self._is_task_cancelled(task_id, cancel_cache):
+                        break
+                    raw_results.extend(future.result())
 
-            # === 阶段2：全局去重 + 截断 — 所有关键词的结果合并后只保留最好的 max_results 个 ===
-            print(f"[SearchEngine] {task_id} 收集完成: {len(raw_results)} 条原始结果，去重并截断到 {max_results} 条...")
+            if self._is_task_cancelled(task_id, cancel_cache):
+                update_search_task(task_id, status='cancelled')
+                return
 
-            # 全局去重（基于 website 域名）
+            print(f"[SearchEngine] {task_id} 收集完成: {len(raw_results)} 条原始结果")
+
+            # 阶段2：全局去重 + 截断
             seen_websites = set()
             deduped_results = []
             for r in raw_results:
                 norm_web = (r.website or '').lower().strip().replace('http://', '').replace('https://', '').replace('www.', '')
-                if not norm_web:
-                    continue
-                if norm_web in seen_websites:
+                if not norm_web or norm_web in seen_websites:
                     continue
                 seen_websites.add(norm_web)
-
-                # 拉黑过滤
                 r_name = (r.raw_data.get('name') or '').lower().strip()
-                if norm_web in blacklist_websites:
-                    print(f"[SearchEngine] 跳过拉黑域名: {norm_web}")
+                if norm_web in blacklist_websites or (r_name and r_name in blacklist_names):
                     continue
-                if r_name and r_name in blacklist_names:
-                    print(f"[SearchEngine] 跳过拉黑公司: {r_name}")
-                    continue
-
                 deduped_results.append(r)
 
-            print(f"[SearchEngine] {task_id} 去重后: {len(deduped_results)} 条")
-
-            # 按 confidence_score 排序，取前 max_results 个
             if len(deduped_results) > max_results:
                 deduped_results.sort(key=lambda r: r.confidence_score or 0, reverse=True)
                 all_results = deduped_results[:max_results]
-                print(f"[SearchEngine] {task_id} 截断到前 {max_results} 条（按置信度排序）")
             else:
                 all_results = deduped_results
 
             found_count = len(all_results)
             update_search_task(task_id, found_count=found_count)
+            print(f"[SearchEngine] {task_id} 去重截断后: {found_count} 条")
 
-            # 网站二次爬取 — 仅对验证通过或待审核的结果执行
+            # ========== 阶段3：并行网站爬取 ==========
             crawl_rejected = 0
             if enable_crawl:
                 crawl_targets = [r for r in all_results
                                  if r.validation_status in ('validated', 'needs_review')
                                  and r.confidence_score >= config.get('min_confidence_for_crawl', 0.3)]
-                print(f"[SearchEngine] {task_id} 开始网站爬取（{len(crawl_targets)}/{len(all_results)} 条通过预检）...")
-                for i, result in enumerate(crawl_targets):
+                print(f"[SearchEngine] {task_id} 并行爬取 {len(crawl_targets)} 条...")
+
+                def _do_crawl(result):
+                    nonlocal crawl_rejected
                     if time.time() - start_time > max_duration:
-                        break
-                    if result.website and result.website.startswith('http'):
-                        try:
-                            crawl_data = self.crawler.crawl(result.website)
-                            if crawl_data:
-                                # 爬取后二次校验
-                                passed, crawl_score = self.validator.validate_crawl_content(
-                                    result, crawl_data, query, location)
-                                if passed:
-                                    result.confidence_score = max(result.confidence_score, crawl_score)
-                                    # 补充爬取到的信息
-                                    if crawl_data.get('emails'):
-                                        result.raw_data['crawled_emails'] = crawl_data['emails']
-                                        if not result.email:
-                                            result.email = crawl_data['emails'][0]
-                                    if crawl_data.get('phones') and not result.phone:
-                                        result.phone = crawl_data['phones'][0]
-                                    if crawl_data.get('title') and not result.company_name:
-                                        result.company_name = crawl_data['title']
-                                    result.raw_data['crawl_data'] = crawl_data
-                                else:
-                                    result.validation_status = 'rejected'
-                                    result.validation_reason = 'crawl_content_not_company_site'
-                                    crawl_rejected += 1
-                                    print(f"[SearchEngine] 爬取内容校验失败: {result.website}")
-                        except Exception as e:
-                            print(f"[SearchEngine] 爬取失败 {result.website}: {e}")
-                    time.sleep(delay)
+                        return result
+                    if not (result.website and result.website.startswith('http')):
+                        return result
+                    try:
+                        crawl_data = self.crawler.crawl(result.website)
+                        if crawl_data:
+                            passed, crawl_score = self.validator.validate_crawl_content(
+                                result, crawl_data, query, location)
+                            if passed:
+                                result.confidence_score = max(result.confidence_score, crawl_score)
+                                if crawl_data.get('emails'):
+                                    result.raw_data['crawled_emails'] = crawl_data['emails']
+                                    if not result.email:
+                                        result.email = crawl_data['emails'][0]
+                                if crawl_data.get('phones') and not result.phone:
+                                    result.phone = crawl_data['phones'][0]
+                                if crawl_data.get('title') and not result.company_name:
+                                    result.company_name = crawl_data['title']
+                                result.raw_data['crawl_data'] = crawl_data
+                            else:
+                                result.validation_status = 'rejected'
+                                result.validation_reason = 'crawl_content_not_company_site'
+                                crawl_rejected += 1
+                    except Exception as e:
+                        print(f"[SearchEngine] 爬取失败 {result.website}: {e}")
+                    return result
+
+                with ThreadPoolExecutor(max_workers=min(len(crawl_targets), 5)) as pool:
+                    futures = {pool.submit(_do_crawl, r): r for r in crawl_targets}
+                    for future in as_completed(futures):
+                        if self._is_task_cancelled(task_id, cancel_cache):
+                            break
+                        future.result()
+
                 print(f"[SearchEngine] 爬取完成: {len(crawl_targets) - crawl_rejected} 条通过, {crawl_rejected} 条被拒绝")
 
-            # AI分析 - 仅对高置信度结果执行
+            if self._is_task_cancelled(task_id, cancel_cache):
+                update_search_task(task_id, status='cancelled')
+                return
+
+            # ========== 阶段4：并行 AI 分析 ==========
             ai_skipped = 0
             if enable_ai and self.enricher.is_available():
                 ai_targets = [r for r in all_results
                               if r.validation_status != 'rejected'
                               and r.confidence_score >= config.get('min_confidence_for_ai_enrich', 0.3)]
                 ai_skipped = len(all_results) - len(ai_targets)
-                print(f"[SearchEngine] {task_id} 开始AI分析（{len(ai_targets)}/{len(all_results)} 条符合门槛，跳过 {ai_skipped} 条）...")
+                print(f"[SearchEngine] {task_id} 并行AI分析 {len(ai_targets)} 条（跳过 {ai_skipped} 条）...")
                 ai_start_time = time.time()
-                ai_max_duration = 1800  # AI分析单独给30分钟
+                ai_max_duration = 1800
 
-                for i, result in enumerate(ai_targets):
-                    # AI阶段单独超时检查
+                def _do_ai(result):
                     if time.time() - ai_start_time > ai_max_duration:
-                        print(f"[SearchEngine] AI分析阶段超时，已分析 {enriched_count}/{i} 条")
-                        break
-
+                        return result
                     try:
-                        company_name = result.company_name or result.raw_data.get('name', '未知')
-                        print(f"[SearchEngine] AI分析 {i+1}/{len(ai_targets)}: {company_name[:40]}")
-
-                        # 如果有爬取数据，使用增强分析
                         crawl_data = result.raw_data.get('crawl_data')
-                        # 若无爬取数据但预检有 title/description，构造轻量数据供深度分析
                         if not crawl_data:
                             probe = result.probe_data or {}
                             if probe.get('title') or probe.get('description'):
@@ -270,16 +273,11 @@ class SearchTaskEngine:
                                     'description': probe.get('description', ''),
                                     'all_text': f"{probe.get('title', '')}\n{probe.get('description', '')}",
                                     'about_text': probe.get('description', ''),
-                                    'emails': [],
-                                    'phones': [],
+                                    'emails': [], 'phones': [],
                                 }
-                                print(f"[SearchEngine]   -> 使用深度分析（基于预检数据）")
-
                         if crawl_data:
-                            print(f"[SearchEngine]   -> 使用深度分析（含网站爬取）")
                             analysis = self.enricher.enrich_with_crawl(result, crawl_data)
                         else:
-                            print(f"[SearchEngine]   -> 使用基础分析")
                             analysis = self.enricher.enrich_result(result)
 
                         if analysis:
@@ -292,42 +290,33 @@ class SearchTaskEngine:
                             result.industry_type = analysis.get('industry_type', result.industry_type)
                             result.business_model = analysis.get('business_model', result.business_model)
                             result.raw_data['ai_analysis'] = analysis
-                            enriched_count += 1
-                            print(f"[SearchEngine]   -> 成功 (confidence={analysis.get('confidence_score')})")
-                        else:
-                            print(f"[SearchEngine]   -> 分析返回空，尝试基础分析兜底...")
-                            # 兜底：至少尝试基础分析
-                            analysis = self.enricher.enrich_result(result)
-                            if analysis:
-                                result.raw_data['ai_analysis'] = analysis
-                                enriched_count += 1
-                                print(f"[SearchEngine]   -> 兜底成功")
-                            else:
-                                print(f"[SearchEngine]   -> 兜底也失败，跳过")
                     except Exception as e:
-                        print(f"[SearchEngine] AI分析失败 {i+1}: {e}")
-                        import traceback
-                        traceback.print_exc()
+                        print(f"[SearchEngine] AI分析失败: {e}")
+                    return result
 
-                    # AI分析间隔稍长，避免API限流
-                    time.sleep(delay)
+                with ThreadPoolExecutor(max_workers=min(len(ai_targets), 4)) as pool:
+                    futures = {pool.submit(_do_ai, r): r for r in ai_targets}
+                    for future in as_completed(futures):
+                        if self._is_task_cancelled(task_id, cancel_cache):
+                            break
+                        future.result()
+                        enriched_count += 1
 
-                print(f"[SearchEngine] AI分析完成: {enriched_count}/{len(ai_targets)} 条成功, {ai_skipped} 条因置信度不足跳过")
+                print(f"[SearchEngine] AI分析完成: {enriched_count}/{len(ai_targets)} 条")
                 update_search_task(task_id, ai_enriched_count=enriched_count)
 
-            # 保存结果到数据库
-            print(f"[SearchEngine] {task_id} 保存 {len(all_results)} 条结果到数据库...")
+            # ========== 阶段5：邮箱搜索 + 批量保存 ==========
+            print(f"[SearchEngine] {task_id} 保存 {len(all_results)} 条结果...")
+            batch_records = []
             for result in all_results:
                 ai_analysis = result.raw_data.get('ai_analysis')
                 confidence = ai_analysis.get('confidence_score') if ai_analysis else None
 
-                # 全网搜索邮箱 — 仅对高置信度结果执行
                 emails_json = None
                 if (result.company_name
                     and result.validation_status != 'rejected'
                     and result.confidence_score >= config.get('min_confidence_for_email_finder', 0.5)):
                     try:
-                        print(f"[SearchEngine]   -> 搜索邮箱: {result.company_name}")
                         emails = self.email_finder.find_emails(
                             company_name=result.company_name,
                             website=result.website,
@@ -335,63 +324,51 @@ class SearchTaskEngine:
                         )
                         if emails:
                             emails_json = emails
-                            # 同时更新主email字段（取第一个职位邮箱或第一个邮箱）
                             if not result.email:
                                 role_emails = [e for e in emails if e['type'] == 'role']
-                                if role_emails:
-                                    result.email = role_emails[0]['email']
-                                else:
-                                    result.email = emails[0]['email']
-                            print(f"[SearchEngine]   -> 找到 {len(emails)} 个邮箱")
-                    except Exception as e:
-                        print(f"[SearchEngine] 邮箱搜索失败: {e}")
-                elif result.validation_status == 'rejected':
-                    print(f"[SearchEngine]   -> 跳过邮箱搜索（结果已拒绝）")
-                elif result.confidence_score < config.get('min_confidence_for_email_finder', 0.5):
-                    print(f"[SearchEngine]   -> 跳过邮箱搜索（置信度 {result.confidence_score:.2f} < 0.5）")
-
-                save_search_result(
-                    task_id=task_id,
-                    platform=result.platform,
-                    source_url=result.source_url,
-                    raw_data=result.raw_data,
-                    company_name=result.company_name,
-                    website=result.website,
-                    country=result.country,
-                    address=result.address,
-                    phone=result.phone,
-                    email=result.email,
-                    industry_type=result.industry_type,
-                    business_model=result.business_model,
-                    confidence_score=result.confidence_score if result.confidence_score is not None else confidence,
-                    ai_analysis=ai_analysis,
-                    search_keyword=query,
-                    search_location=location,
-                    emails_json=emails_json,
-                    validation_status=result.validation_status,
-                    validation_reason=result.validation_reason,
-                    pre_crawl_score=result.confidence_score,
-                    crawl_validation_passed=result.validation_status == 'validated',
-                    probe_title=result.probe_data.get('title', '') if result.probe_data else '',
-                    probe_description=result.probe_data.get('description', '') if result.probe_data else '',
-                    user_id=user_id
-                )
-
-                # 自动导入（高置信度）
-                if auto_import_threshold > 0 and confidence and confidence >= auto_import_threshold:
-                    try:
-                        # 获取刚保存的结果ID
-                        conn = get_search_task(task_id)  # 这里只是为了保持连接，实际逻辑在下面
-                        # 由于save_search_result返回了result_id，但我们在循环中没保存
-                        # 自动导入改为在保存后通过API触发更合理
-                        pass
+                                result.email = role_emails[0]['email'] if role_emails else emails[0]['email']
                     except Exception:
                         pass
 
-            # 统计被拒绝的结果数
-            pre_filtered = len([r for r in all_results if r.validation_status == 'rejected'])
+                batch_records.append({
+                    'task_id': task_id,
+                    'platform': result.platform,
+                    'source_url': result.source_url,
+                    'raw_data': result.raw_data,
+                    'company_name': result.company_name,
+                    'website': result.website,
+                    'country': result.country,
+                    'address': result.address,
+                    'phone': result.phone,
+                    'email': result.email,
+                    'industry_type': result.industry_type,
+                    'business_model': result.business_model,
+                    'confidence_score': result.confidence_score if result.confidence_score is not None else confidence,
+                    'ai_analysis': ai_analysis,
+                    'search_keyword': query,
+                    'search_location': location,
+                    'emails_json': emails_json,
+                    'validation_status': result.validation_status,
+                    'validation_reason': result.validation_reason,
+                    'pre_crawl_score': result.confidence_score,
+                    'crawl_validation_passed': result.validation_status == 'validated',
+                    'probe_title': result.probe_data.get('title', '') if result.probe_data else '',
+                    'probe_description': result.probe_data.get('description', '') if result.probe_data else '',
+                    'user_id': user_id
+                })
 
-            # 更新任务完成状态（含验证统计）
+            if batch_records:
+                try:
+                    save_search_results_batch(batch_records)
+                except Exception as e:
+                    print(f"[SearchEngine] 批量保存失败: {e}，回退逐条")
+                    for item in batch_records:
+                        try:
+                            save_search_result(**item)
+                        except Exception:
+                            pass
+
+            pre_filtered = len([r for r in all_results if r.validation_status == 'rejected'])
             update_search_task(
                 task_id,
                 status='completed',
