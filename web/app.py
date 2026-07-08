@@ -3837,7 +3837,7 @@ def api_material_update(material_id):
         current_user_id = get_current_user_id()
         admin = is_admin()
         update_material(material_id, data, user_id=current_user_id, admin=admin)
-        return jsonify({'success': True, 'message': '资料更新成功'})
+        return jsonify({'success': True, 'data': {'updated': True}, 'message': '资料更新成功'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -3849,7 +3849,7 @@ def api_material_delete(material_id):
         current_user_id = get_current_user_id()
         admin = is_admin()
         delete_material(material_id, user_id=current_user_id, admin=admin)
-        return jsonify({'success': True, 'message': '资料删除成功'})
+        return jsonify({'success': True, 'data': {'deleted': True}, 'message': '资料删除成功'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -4412,7 +4412,7 @@ def api_materials_sender_info():
         saved_id = save_sender_info(data, user_id=current_user_id, material_id=material_id)
         return jsonify({
             'success': True,
-            'material_id': saved_id,
+            'data': {'material_id': saved_id},
             'message': '发信人信息已保存'
         })
     except Exception as e:

@@ -3817,8 +3817,8 @@
         }
 
         // 渲染退信统计
-        if (bounceStats && bounceStats.success) {
-            const d = bounceStats.data;
+        if (bounceStats) {
+            const d = bounceStats;
             document.getElementById('s-bounce-rate').textContent = d.rate + '%';
             document.getElementById('s-bounce-total').textContent = d.total;
             document.getElementById('s-bounce-hard').textContent = d.hard;
@@ -4178,36 +4178,24 @@
             toast('发信人姓名不能为空', 'err');
             return;
         }
-        try {
-            const res = await api('/api/materials/sender-info', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            if (res && res.success) {
-                toast(window._currentSenderMaterialId ? '发信人模板已更新' : '发信人模板已创建');
-                closeSenderInfoModal();
-                loadSenderInfoCard();
-            } else {
-                toast(res.error || '保存失败', 'err');
-            }
-        } catch (e) {
-            toast('保存失败', 'err');
+        const res = await api('/api/materials/sender-info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res !== null) {
+            toast(window._currentSenderMaterialId ? '发信人模板已更新' : '发信人模板已创建');
+            closeSenderInfoModal();
+            loadSenderInfoCard();
         }
     }
 
     async function deleteSenderInfo(materialId) {
         if (!confirm('确定要删除这个发信人模板吗？')) return;
-        try {
-            const res = await api(`/api/materials/${materialId}`, { method: 'DELETE' });
-            if (res && res.success) {
-                toast('已删除');
-                loadSenderInfoCard();
-            } else {
-                toast(res.error || '删除失败', 'err');
-            }
-        } catch (e) {
-            toast('删除失败', 'err');
+        const res = await api(`/api/materials/${materialId}`, { method: 'DELETE' });
+        if (res !== null) {
+            toast('已删除');
+            loadSenderInfoCard();
         }
     }
 
@@ -4483,7 +4471,7 @@
     async function deleteMaterial(id) {
         if (!confirm('确定要删除这条资料吗？')) return;
         const res = await api('/api/materials/' + id, { method: 'DELETE' });
-        if (res) {
+        if (res !== null) {
             toast('资料已删除', 'ok');
             loadMaterials(materialPage);
         }
@@ -4786,12 +4774,10 @@
                 body: JSON.stringify({ text: text })
             });
 
-            if (result && result.success) {
-                aiExtractedData = result.data;
-                renderAIExtractResult(result.data);
+            if (result !== null) {
+                aiExtractedData = result;
+                renderAIExtractResult(result);
                 toast('AI 识别完成', 'ok');
-            } else {
-                toast(result?.error || '识别失败', 'err');
             }
         } catch (e) {
             toast('识别出错: ' + e.message, 'err');
@@ -4954,12 +4940,10 @@
                 body: formData
             });
 
-            if (result && result.success) {
-                aiExtractedData = result.data;
-                renderAIExtractResult(result.data);
+            if (result !== null) {
+                aiExtractedData = result;
+                renderAIExtractResult(result);
                 toast('AI 文件分析完成', 'ok');
-            } else {
-                toast(result?.error || '分析失败', 'err');
             }
         } catch (e) {
             toast('分析出错: ' + e.message, 'err');
@@ -6966,7 +6950,7 @@
             headers: { 'Content-Type': 'application/json' }
         });
         if (res !== null) {
-            toast(res.message || '操作完成', res.success ? 'ok' : 'err');
+            toast('操作完成', 'ok');
             setTimeout(loadScheduler, 1000);
         }
     }
@@ -7370,8 +7354,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: action })
             });
-            if (res) {
-                toast(res.message || '操作完成', res.success ? 'ok' : 'err');
+            if (res !== null) {
+                toast('操作完成', 'ok');
                 refreshSchedulerProgress();
             }
         } catch (e) {
@@ -7393,8 +7377,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: action })
             });
-            if (res) {
-                toast(res.message || '操作完成', res.success ? 'ok' : 'err');
+            if (res !== null) {
+                toast('操作完成', 'ok');
             }
         } catch (e) {
             toast('操作失败: ' + e.message, 'err');
