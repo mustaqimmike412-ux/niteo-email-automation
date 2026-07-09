@@ -271,7 +271,7 @@ class CompanyResearcher:
             opportunities = [
                 {'priority': 1, 'desc': 'Provide pure black BC cells that blend seamlessly with security device aesthetics'},
                 {'priority': 2, 'desc': 'High-efficiency power generation in low-light conditions for 24/7 device operation'},
-                {'priority': 3, 'desc': 'Proven track record with Ring and Arlo in the same product category'}
+                {'priority': 3, 'desc': 'Proven track record with leading brands in the same product category'}
             ]
         elif industry == 'automation':
             opportunities = [
@@ -345,7 +345,7 @@ class CustomerClassifier:
         
         # 案例匹配标签
         if track == 'Security & Smart Home Hardware':
-            case_tag = 'Ring / Arlo / Eufy'
+            case_tag = 'Security / Smart Home'
         else:
             case_tag = 'No Matched Case'
         
@@ -707,20 +707,20 @@ class EmailComposer:
         if track == 'Security & Smart Home Hardware':
             subjects = [
                 "Solar Solutions for Your Security Devices",
-                "How Ring & Arlo Power Their Cameras with Solar",
-                "Custom Solar Panels for Security Hardware"
+                "Custom Solar Panels for Security Hardware",
+                "Reliable Solar Power for Smart Home Products"
             ]
         elif track == 'Outdoor & Portable Power':
             subjects = [
                 "Lighter Solar Panels for Outdoor Gear",
-                "Boost Your Portable Power Products with BC Cells",
-                "OEM Solar Solutions for Outdoor Brands"
+                "High-Efficiency Solar Solutions for Portable Power",
+                "Custom Solar Solutions for Outdoor Brands"
             ]
         else:
             subjects = [
                 "Solar Partnership Opportunity",
                 "Custom PV Solutions for Your Product Line",
-                "How We Help Brands Like Yours Go Solar"
+                "Reliable Solar Solutions for Your Products"
             ]
         
         import random
@@ -828,27 +828,23 @@ class EmailComposer:
         # 有案例匹配时：直接使用案例素材
         if cases and ('security' in track.lower() or 'smart home' in track.lower()):
             case_names = [c.get('name', str(c)) for c in cases]
-            clean_names = ['Ring', 'Arlo', 'Eufy']
-            case_text = ', '.join(clean_names)
+            case_text = ', '.join(str(n) for n in case_names[:3]) if case_names else ''
             
             rules = materials.get('rules', {})
             tech_priority = rules.get('tech_priority', [])
             
-            if 'bc_no_gridline' in tech_priority:
-                return (
-                    f"We've developed custom solar solutions for {case_text}. "
-                    f"For Ring's video doorbell, we created a 0.57W solar backplate "
-                    f"that extends battery life by ~35% in an extremely compact form factor. "
-                    f"For Arlo's Ultra series, our magnetic solar panels deliver reliable trickle charging "
-                    f"with fully waterproof snap-to-connect design."
-                )
+            if cases and len(cases) > 0:
+                # 直接使用用户导入的案例内容
+                case_content = cases[0].get('content', cases[0]) if isinstance(cases[0], dict) else str(cases[0])
+                if isinstance(case_content, dict):
+                    case_text = case_content.get('email_copy', '') or case_content.get('summary', '') or str(case_content)[:500]
+                elif isinstance(case_content, str):
+                    case_text = case_content[:500]
+                else:
+                    case_text = str(case_content)[:500]
+                return case_text
             else:
-                return (
-                    f"As a deep OEM/ODM partner for {case_text}, "
-                    f"we deliver tailored solar solutions from standard panels to complex non-standard custom designs. "
-                    f"Our BC no-gridline cell technology and precision structural integration capabilities "
-                    f"have been proven across the security industry."
-                )
+                return ''
         
         # 无案例匹配时：分析痛点 + 提供定制化解决方案
         elif pain_points:
@@ -873,9 +869,9 @@ class EmailComposer:
         # 无痛点也无案例时的兜底方案
         else:
             return (
-                "With 10+ years in solar customization, we've solved virtually every integration challenge imaginable. "
+                "We specialize in custom solar solutions tailored to your specific product requirements. "
                 "Whether you need custom dimensions, specific power outputs, unique connectors, or aesthetic matching, "
-                "our R&D team can turn your requirements into production-ready solutions within 7-15 days."
+                "our R&D team can turn your requirements into production-ready solutions."
             )
     
     def _generate_solutions_from_pains(self, pain_points: List[Dict], classification: Dict) -> List[str]:
@@ -890,17 +886,17 @@ class EmailComposer:
             if pain_type == 'supply_chain' or 'supply' in pain_desc.lower():
                 solutions.append(
                     "Supply chain resilience through our multi-country production network "
-                    "(China, Saudi Arabia, Indonesia, Vietnam) ensures uninterrupted delivery regardless of regional disruptions."
+                    "ensures uninterrupted delivery regardless of regional disruptions."
                 )
             elif pain_type == 'cost' or 'cost' in pain_desc.lower():
                 solutions.append(
-                    "Our DDP (Delivered Duty Paid) service to Los Angeles provides transparent, all-inclusive pricing "
+                    "Our DDP (Delivered Duty Paid) service provides transparent, all-inclusive pricing "
                     "with no hidden customs or logistics fees, giving you full cost control from day one."
                 )
             elif pain_type == 'quality' or 'quality' in pain_desc.lower():
                 solutions.append(
-                    "TUV, CE, UL, UKCA, ISO9001, ISO14001, Amazon QSA, and SA8000 certifications "
-                    "ensure every panel meets the highest global standards. Same quality as Ring and Arlo receive."
+                    "Our products meet international quality standards with comprehensive certifications, "
+                    "ensuring every panel meets the highest global standards."
                 )
             elif pain_type == 'compatibility' or 'compatibility' in pain_desc.lower():
                 solutions.append(
@@ -909,13 +905,13 @@ class EmailComposer:
                 )
             elif pain_type == 'aesthetics' or 'aesthetics' in pain_desc.lower():
                 solutions.append(
-                    "Our BC (Back Contact) no-gridline cells deliver a pure black, premium appearance "
-                    "that blends perfectly with high-end product designs—no visible metal lines, just seamless elegance."
+                    "Our premium cell technology delivers a clean, premium appearance "
+                    "that blends perfectly with high-end product designs."
                 )
             elif pain_type == 'efficiency' or 'efficiency' in pain_desc.lower():
                 solutions.append(
-                    "BC cell technology achieves 15-20% higher conversion efficiency than conventional panels, "
-                    "with superior low-light performance maintaining 90%+ output even on cloudy days."
+                    "Advanced cell technology achieves higher conversion efficiency than conventional panels, "
+                    "with superior low-light performance."
                 )
             elif pain_type == 'battery_life' or 'battery' in pain_desc.lower():
                 solutions.append(
@@ -934,8 +930,8 @@ class EmailComposer:
                 )
             elif pain_type == 'reliability' or 'reliability' in pain_desc.lower():
                 solutions.append(
-                    "Rigorous quality control with Amazon QSA and SA8000 certifications. "
-                    "Proven track record of 98.5% on-time delivery and 4.8/5 customer satisfaction."
+                    "Rigorous quality control with comprehensive certifications. "
+                    "Proven track record of reliable on-time delivery and high customer satisfaction."
                 )
             elif pain_type == 'portability' or 'portability' in pain_desc.lower():
                 solutions.append(
@@ -946,7 +942,7 @@ class EmailComposer:
                 # 通用解决方案
                 solutions.append(
                     "Our experienced R&D team specializes in solving unique integration challenges. "
-                    "From concept to production sample in 7-15 days, with full technical support throughout."
+                    "From concept to production sample, with full technical support throughout."
                 )
         
         return solutions
@@ -963,11 +959,18 @@ class EmailComposer:
     
     def _generate_signature(self) -> str:
         """生成签名（固定格式，分行左对齐，不添加多余符号）"""
-        name = self.sender_info.get('sender_name', 'Travis')
-        title = self.sender_info.get('job_title', 'Business Development Manager')
-        company = self.sender_info.get('company_name', 'Niteo Solar')
-        
-        return f"Best regards,\n{name}\n{title}\n{company}"
+        name = self.sender_info.get('sender_name', '')
+        title = self.sender_info.get('job_title', '')
+        company = self.sender_info.get('company_name', '')
+
+        signature_lines = ["Best regards,"]
+        if name:
+            signature_lines.append(name)
+        if title:
+            signature_lines.append(title)
+        if company:
+            signature_lines.append(company)
+        return "\n".join(signature_lines)
 
 
 class EmailRefiner:
@@ -1205,7 +1208,7 @@ class EmailWorkflow:
 
         # 签名关键词检测
         sig_keywords = ['Best regards', 'best regards', 'Regards,', 'regards,',
-                        'Sincerely', 'sincerely', 'Travis', 'Business Development Manager']
+                        'Sincerely', 'sincerely']
 
         for line in lines:
             stripped = line.strip()

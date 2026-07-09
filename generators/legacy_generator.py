@@ -21,63 +21,8 @@ class LegacyEmailGenerator:
         return {}
 
     def _load_advantages(self):
-        """加载6点优势（英文版，带关键词）"""
-        return {
-            "core_tech": {
-                "name": "Core Technology: High-Performance BC Cells",
-                "feature": "Surface grid-free design with pure black aesthetics, all conductive grids integrated on the back",
-                "advantage": "Unobstructed surface absorbs more sunlight, superior low-light performance, premium pure-black appearance",
-                "benefit": "Significantly improved power generation and conversion efficiency, stable output even in suboptimal lighting, seamless integration into high-end product designs",
-                "evidence": "Trusted supplier of customized photovoltaic modules for Amazon, Ring, Arlo, and other top-tier brands",
-                "applicable": ["small", "large"],
-                "keywords": ["aesthetic", "design", "appearance", "premium", "high-end", "black", "efficiency"]
-            },
-            "oem_odm": {
-                "name": "Top-Tier OEM/ODM Capabilities",
-                "feature": "Full-spectrum customization including irregular shapes, lightweight versions, flexible panels, and BIPV solutions",
-                "advantage": "Backed by partnerships with industry leaders, top-tier quality control and manufacturing standards, highly matched mold and production solutions",
-                "benefit": "Dramatically reduced trial-and-error costs, with tailored solutions for even the most unique product designs",
-                "evidence": "OEM partner for global industry giants including Amazon, Ring, Arlo, EcoFlow, and Jinko Solar",
-                "applicable": ["small", "large"],
-                "keywords": ["custom", "customization", "OEM", "ODM", "design", "unique", "tailored", "flexible"]
-            },
-            "global_supply": {
-                "name": "Global Production Footprint",
-                "feature": "Manufacturing facilities in China, Saudi Arabia, Indonesia, and Vietnam",
-                "advantage": "Flexible multi-country production allocation, mitigating geopolitical trade risks",
-                "benefit": "Supply chain resilience ensures uninterrupted delivery regardless of regional disruptions",
-                "evidence": "Strategic global manufacturing base that adapts flexibly to international trade policy changes",
-                "applicable": ["small", "large"],
-                "keywords": ["supply chain", "delivery", "logistics", "global", "international", "trade", "risk"]
-            },
-            "one_stop_solution": {
-                "name": "One-Stop Full-Scenario Solutions",
-                "feature": "Solar panels ranging from 1W to 200W, fully certified with TUV, CE, UL, UKCA, and ISO",
-                "advantage": "From individual components to complete energy storage systems, meeting stringent compliance requirements across all global regions",
-                "benefit": "Eliminates the need to coordinate multiple suppliers and simplifies complex compliance verification processes",
-                "evidence": "Supplier to Japanese energy giant DMM Energy, holder of comprehensive international authoritative certifications",
-                "applicable": ["small", "large"],
-                "keywords": ["certification", "compliance", "certified", "solution", "system", "complete"]
-            },
-            "ddp_service": {
-                "name": "Hassle-Free Logistics & Customs Clearance",
-                "feature": "DDP (Delivered Duty Paid) shipping terms with direct delivery to Los Angeles, USA",
-                "advantage": "We assume all transportation risks, freight costs, and customs clearance procedures and duties",
-                "benefit": "You simply wait for delivery without dealing with complex cross-border logistics or hidden fees, with transparent and controllable procurement costs from the start",
-                "evidence": "Established cross-border delivery network with proven DDP service experience to Los Angeles",
-                "applicable": ["small", "large"],
-                "keywords": ["shipping", "delivery", "logistics", "DDP", "customs", "import", "transport"]
-            },
-            "case_studies": {
-                "name": "Proven Success with Leading Brands",
-                "feature": "Customized photovoltaic modules for top-tier brands including Ring, Arlo, and Eufy",
-                "advantage": "Comprehensive solution capabilities from standardized interfaces to high-difficulty waterproof magnetic interfaces",
-                "benefit": "Clients can directly leverage proven solutions, significantly shortening product development cycles",
-                "evidence": "Successful cases including Ring doorbell back panels, Arlo magnetic solar panels, and Eufy dual-lens panoramic cameras",
-                "applicable": ["small", "large"],
-                "keywords": ["case study", "success", "proven", "Ring", "Arlo", "Eufy", "brand", "reference"]
-            }
-        }
+        """优势库已迁移到数据库，此方法不再返回硬编码数据"""
+        return []
 
     # ========== SmartEmailGenerator 核心方法 ==========
 
@@ -176,12 +121,12 @@ Best regards,
     def _generate_email_2(self, customer_data, advantage):
         """Email 2: 核心技术与视觉突围"""
         customer_name = customer_data.get('customer_name', '')
-        subject = f"BC Cell Technology - Pure Black & High Efficiency"
+        subject = f"Advanced Cell Technology - Pure Black & High Efficiency"
         body = f"""Hi {customer_name} Team,
 
 Following up on my last email - I'd like to share a technology that could differentiate your products.
 
-{advantage['feature'] if advantage else 'Our BC (Back Contact) cell technology features a pure black surface with all conductive grids on the back.'}
+{advantage['feature'] if advantage else 'Our advanced cell technology features a pure black surface with all conductive grids on the back.'}
 
 {advantage['advantage'] if advantage else 'This means more sunlight absorption, higher conversion efficiency, and a premium aesthetic that integrates seamlessly with high-end product designs.'}
 
@@ -224,7 +169,7 @@ Best regards,
 
 Managing international logistics and customs can be complex and time-consuming.
 
-{advantage['feature'] if advantage else 'We offer DDP (Delivered Duty Paid) shipping terms with direct delivery to Los Angeles and other major ports.'}
+{advantage['feature'] if advantage else 'We offer DDP (Delivered Duty Paid) service with direct delivery to major ports.'}
 
 {advantage['advantage'] if advantage else 'We handle all transportation risks, freight costs, and customs clearance procedures.'}
 
@@ -245,7 +190,7 @@ Best regards,
 
 To summarize what we can offer:
 
-- Premium BC cell technology for superior efficiency and aesthetics
+- Premium advanced cell technology for superior efficiency and aesthetics
 - Proven OEM/ODM experience with top global brands
 - Durable glass-protected panels for harsh outdoor conditions
 - Hassle-free DDP delivery to your location
@@ -454,7 +399,7 @@ Best regards,
         elif industry == 'agriculture':
             return f"Solar Solutions for {customer_name}'s Farm Monitoring"
         else:
-            return f"Partnership Opportunity - {customer_name} & Niteo Solar"
+            return f"Partnership Opportunity - {customer_name} & Our Company"
 
     def _generate_body(self, greeting, customer_name, business_profile, matched_advantages, has_website=True):
         """生成邮件正文"""
@@ -479,11 +424,11 @@ Best regards,
 {cta}
 
 Best regards,
-{self.company_info.get('sender_name', 'Travis')}
-{self.company_info.get('job_title', 'Business Development Manager')}
-{self.company_info.get('company_name', 'Niteo Solar')}
-{self.company_info.get('email', 'travis@niteowork.com')}
-{self.company_info.get('website', 'www.niteosolar.com')}"""
+{self.company_info.get('sender_name', '')}
+{self.company_info.get('job_title', '')}
+{self.company_info.get('company_name', '')}
+{self.company_info.get('email', '')}
+{self.company_info.get('website', '')}"""
         return body
 
     def _generate_opening(self, customer_name, business_profile, has_website=True):
@@ -524,10 +469,10 @@ These issues not only increase operational costs but can also compromise the rel
     def _generate_solution_section(self, advantage, business_profile):
         """生成解决方案部分"""
         adv_name = advantage['name']
-        if 'BC Cells' in adv_name or 'Technology' in adv_name:
-            return """**Our BC Cell Technology Solves This:**
+        if 'Technology' in adv_name or 'Core' in adv_name:
+            return """**Our Advanced Cell Technology Solves This:**
 
-Our back-contact solar cells feature a pure black surface with all conductive grids integrated on the back. This means:
+Our advanced solar cells feature a pure black surface with all conductive grids integrated on the back. This means:
 
 - **More Power**: Unobstructed surface absorbs more sunlight
 - **Better Low-Light Performance**: Critical for dawn/dusk wildlife monitoring
@@ -545,17 +490,13 @@ We don't believe in one-size-fits-all. Our OEM/ODM capabilities include:
         elif 'Case Studies' in adv_name or 'Success' in adv_name:
             return """**Proven Results with Similar Products:**
 
-We've successfully partnered with leading brands in your space:
-
-- **Ring**: Custom solar panels for video doorbells with magnetic mounting
-- **Arlo**: Magnetic solar panels for wireless security cameras
-- **Eufy**: Integrated solar solutions for dual-lens panoramic cameras
+We've successfully partnered with leading brands in your space, delivering reliable, aesthetically pleasing solar solutions for consumer security products.
 
 These partnerships demonstrate our ability to deliver reliable, aesthetically pleasing solar solutions for consumer security products."""
         elif 'Global' in adv_name:
             return """**Reliable Supply Chain:**
 
-With manufacturing facilities across China, Saudi Arabia, Indonesia, and Vietnam, we ensure:
+With manufacturing facilities across multiple countries, we ensure:
 
 - **Consistent Supply**: No single point of failure
 - **Flexible Production**: Scale up or down based on demand
@@ -576,7 +517,7 @@ Your trail cameras and outdoor monitoring solutions operate in the same challeng
 - **Aesthetically Pleasing**: Match the quality of your product design
 - **Low Maintenance**: Reduce customer support burden
 
-We've solved these exact challenges for Ring, Arlo, and Eufy - and we can do the same for {customer_name}."""
+We've solved these exact challenges for leading brands - and we can do the same for {customer_name}."""
         else:
             return "Our solutions have been proven across multiple industries and applications, ensuring we can meet your specific requirements."
 

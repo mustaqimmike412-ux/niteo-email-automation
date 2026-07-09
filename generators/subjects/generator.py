@@ -53,7 +53,7 @@ class SubjectGenerator:
         
         "tech_highlight": [
             "BC Cell Technology - Pure Black & High Efficiency for {customer_name}",
-            "The Solar Tech Behind Amazon & Ring's Products",
+            "The Solar Tech Behind Leading Security Products",
             "Higher Efficiency, Sleeker Design: BC Cells for {customer_name}",
             "Why Leading Brands Choose Our Back-Contact Solar Technology",
             "Pure Black Solar Panels: More Power, Better Aesthetics",
@@ -80,9 +80,9 @@ class SubjectGenerator:
         
         "social_proof_cta": [
             "Quick Question About {customer_name}'s Solar Needs",
-            "15-Min Call: How Ring & Arlo Use Our Solar Solutions",
+            "15-Min Call: How Leading Brands Use Our Solar Solutions",
             "Free Sample Offer for {customer_name}'s Engineering Team",
-            "See Why Amazon Chose Us for Their Solar Partnership",
+            "See Why Leading Brands Choose Our Solar Solutions",
             "Can We Support {customer_name}'s Next Product Launch?",
             "Explore Solar Integration: 10-Minute Discovery Call"
         ]
@@ -222,7 +222,7 @@ class SubjectGenerator:
 
 if __name__ == '__main__':
     # 测试
-    generator = SubjectGenerator({'company_name': 'Niteo Solar'})
+    generator = SubjectGenerator({'company_name': ''})
     
     test_customer = {
         'customer_name': 'Reconyx',
