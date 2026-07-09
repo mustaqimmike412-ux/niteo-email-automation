@@ -121,7 +121,19 @@ from database.user_settings_models import get_user_setting, save_user_setting, g
 from web.auth import auth_bp, init_oauth, login_required, admin_required
 
 app = Flask(__name__, static_folder='dashboard', static_url_path='')
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+
+# SECRET_KEY: 优先从环境变量读取，其次从文件读取/生成，确保多 worker 重启后一致
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    _secret_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.flask_secret')
+    if os.path.exists(_secret_file):
+        with open(_secret_file, 'r') as f:
+            _secret_key = f.read().strip()
+    else:
+        _secret_key = os.urandom(32).hex()
+        with open(_secret_file, 'w') as f:
+            f.write(_secret_key)
+app.config['SECRET_KEY'] = _secret_key
 app.config['WTF_CSRF_ENABLED'] = False  # 禁用全局CSRF，API通过 X-Requested-With 请求头验证保护
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
@@ -1860,9 +1872,8 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
         from core.sender import EmailSender
         from generators.workflow import EmailWorkflow
         sender = EmailSender()
-        current_user_id = get_current_user_id()
         sender_material_id = task.get('sender_material_id') if task else None
-        workflow = EmailWorkflow(user_id=current_user_id, sender_material_id=sender_material_id)
+        workflow = EmailWorkflow(user_id=user_id, sender_material_id=sender_material_id)
 
         # 按客户分组
         from collections import defaultdict
@@ -3387,8 +3398,7 @@ def _do_generate_preview(task_id, customer_id, user_id=None):
 
         # 延迟导入避免循环
         from generators.workflow import EmailWorkflow
-        current_user_id = get_current_user_id()
-        workflow = EmailWorkflow(user_id=current_user_id)
+        workflow = EmailWorkflow(user_id=user_id)
 
         # 生成邮件内容
         def on_progress(step_id, status):
