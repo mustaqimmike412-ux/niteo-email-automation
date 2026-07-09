@@ -1251,6 +1251,12 @@ class EmailWorkflow:
             target_word_count: 目标字数范围 {'min': int, 'max': int}
             selected_material_ids: 用户手动选中的素材ID列表
         """
+        # 确保 target_word_count 是字典格式
+        if target_word_count is None:
+            target_word_count = {'min': 150, 'max': 250}
+        elif isinstance(target_word_count, int):
+            target_word_count = {'min': max(target_word_count - 30, 80), 'max': target_word_count + 30}
+
         has_website = bool(website and website.strip() and website.strip().startswith('http'))
 
         def _notify(step_id, status='running'):
