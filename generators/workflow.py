@@ -1193,8 +1193,9 @@ class EmailWorkflow:
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            return config.get('generation', 'template') == 'ai'
-        return False
+            mode = config.get('generation', 'ai')  # 默认 LLM 模式
+            return mode == 'ai'
+        return True  # 无配置文件时默认使用 LLM 模式
 
     def _strip_greeting_and_signature(self, body: str, greeting: str, signature: str) -> str:
         """
