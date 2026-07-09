@@ -3,6 +3,7 @@ import sqlite3
 import re
 import os
 import sys
+import argparse
 
 # 确保能导入项目根目录模块
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -12,6 +13,12 @@ if _project_root not in sys.path:
 from database.connection import get_connection
 from database.schema import init_database
 from utils.file_parser import parse_emails, _detect_email_type
+
+# ==================== user_id 说明 ====================
+# user_id 用于标识数据所属的用户，在多用户环境下实现数据隔离。
+# 所有数据库写入操作（customers、contacts、emails）均携带 user_id 字段。
+# 当 user_id 为 None 时，表示未绑定用户（兼容旧数据或系统级导入）。
+# ======================================================
 
 def parse_email_text(email_text, source='customer_email'):
     """
@@ -40,8 +47,12 @@ def classify_email_type(email_address, contact_name=None):
     """分类邮箱类型 — 委托给 file_parser._detect_email_type"""
     return _detect_email_type(email_address)
 
-def import_excel_to_db(excel_path):
-    """导入Excel数据到数据库"""
+def import_excel_to_db(excel_path, user_id: int = None):
+    """导入Excel数据到数据库
+    Args:
+        excel_path: Excel文件路径
+        user_id: 用户ID，用于多用户数据隔离，为None时表示未绑定用户
+    """
     print(f"正在读取Excel文件: {excel_path}")
     df = pd.read_excel(excel_path)
 
@@ -61,8 +72,8 @@ def import_excel_to_db(excel_path):
             cursor.execute('''
                 INSERT INTO customers
                 (customer_name, country, address, website, company_info,
-                 supplier, supplier_info, customs_data, logistics_info)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 supplier, supplier_info, customs_data, logistics_info, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 str(row.get('客户', '')).strip(),
                 str(row.get('国家', '')).strip() if pd.notna(row.get('国家')) else None,
@@ -72,7 +83,8 @@ def import_excel_to_db(excel_path):
                 str(row.get('供应商', '')).strip() if pd.notna(row.get('供应商')) else None,
                 str(row.get('供应商信息', '')).strip() if pd.notna(row.get('供应商信息')) else None,
                 str(row.get('海关数据购买产品名', '')).strip() if pd.notna(row.get('海关数据购买产品名')) else None,
-                str(row.get('物流信息', '')).strip() if pd.notna(row.get('物流信息')) else None
+                str(row.get('物流信息', '')).strip() if pd.notna(row.get('物流信息')) else None,
+                user_id
             ))
 
             customer_id = cursor.lastrowid
@@ -85,13 +97,14 @@ def import_excel_to_db(excel_path):
                 if email_info['contact_name']:
                     cursor.execute('''
                         INSERT INTO contacts
-                        (customer_id, contact_name, job_title, source)
-                        VALUES (?, ?, ?, ?)
+                        (customer_id, contact_name, job_title, source, user_id)
+                        VALUES (?, ?, ?, ?, ?)
                     ''', (
                         customer_id,
                         email_info['contact_name'],
                         email_info['job_title'],
-                        email_info['source']
+                        email_info['source'],
+                        user_id
                     ))
                     contact_id = cursor.lastrowid
                     total_contacts += 1
@@ -100,15 +113,16 @@ def import_excel_to_db(excel_path):
                 cursor.execute('''
                     INSERT INTO emails
                     (customer_id, contact_id, email_address, email_type,
-                     contact_name, job_title)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                     contact_name, job_title, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     customer_id,
                     contact_id,
                     email_info['email_address'],
                     email_info['email_type'],
                     email_info['contact_name'],
-                    email_info['job_title']
+                    email_info['job_title'],
+                    user_id
                 ))
                 total_emails += 1
 
@@ -120,13 +134,14 @@ def import_excel_to_db(excel_path):
                 if email_info['contact_name']:
                     cursor.execute('''
                         INSERT INTO contacts
-                        (customer_id, contact_name, job_title, source)
-                        VALUES (?, ?, ?, ?)
+                        (customer_id, contact_name, job_title, source, user_id)
+                        VALUES (?, ?, ?, ?, ?)
                     ''', (
                         customer_id,
                         email_info['contact_name'],
                         email_info['job_title'],
-                        email_info['source']
+                        email_info['source'],
+                        user_id
                     ))
                     contact_id = cursor.lastrowid
                     total_contacts += 1
@@ -135,15 +150,16 @@ def import_excel_to_db(excel_path):
                 cursor.execute('''
                     INSERT INTO emails
                     (customer_id, contact_id, email_address, email_type,
-                     contact_name, job_title)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                     contact_name, job_title, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     customer_id,
                     contact_id,
                     email_info['email_address'],
                     'linkedin',
                     email_info['contact_name'],
-                    email_info['job_title']
+                    email_info['job_title'],
+                    user_id
                 ))
                 total_emails += 1
 
@@ -235,14 +251,19 @@ def show_statistics():
             print(f"  {ex[0]}: {ex[1]} ({ex[2]}) - {ex[3]} [{ex[4]}]")
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='导入Excel数据到数据库')
+    parser.add_argument('--excel-path', type=str, required=True, help='Excel文件路径')
+    parser.add_argument('--user-id', type=int, default=None, help='用户ID，用于多用户数据隔离')
+    args = parser.parse_args()
+
     # 初始化数据库
     init_database()
 
     # 导入Excel数据
-    excel_path = r'c:\Users\fjy\.trae-cn\attachments\6a2fffcfb8fffc68440d4dd7\30a4f47b-274e-41d7-b2d0-4d9d7f7e825d_8bae562b-71f1-4366-b423-95d10068db05_开发表格20260405updated.xlsx'
+    excel_path = args.excel_path
 
     if os.path.exists(excel_path):
-        import_excel_to_db(excel_path)
+        import_excel_to_db(excel_path, user_id=args.user_id)
         show_statistics()
     else:
         print(f"文件不存在: {excel_path}")

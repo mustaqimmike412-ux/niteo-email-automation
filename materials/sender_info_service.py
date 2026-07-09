@@ -12,14 +12,14 @@ from typing import Dict, List, Optional
 from database.material_models import get_sender_info_material
 
 
-# 默认发信人信息（最后的回退）
+# 默认发信人信息（已清空，所有信息由用户自行配置）
 DEFAULT_SENDER_INFO = {
-    "sender_name": "Travis",
-    "job_title": "Business Development Manager",
-    "company_name": "Niteo Solar",
-    "company_website": "https://www.niteosolar.com",
-    "sender_email": "travisturner89@gmail.com",
-    "signature": "Travis\nBusiness Development Manager\nNiteo Solar"
+    "sender_name": "",
+    "job_title": "",
+    "company_name": "",
+    "company_website": "",
+    "sender_email": "",
+    "signature": ""
 }
 
 

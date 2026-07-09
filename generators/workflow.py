@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 from duckduckgo_search import DDGS
 from services.llm_client import LLMEmailClient
 from materials.unified_interface import (
-    MATERIAL_LIBRARY, get_advantages_by_power_type, get_cases_by_track,
+    get_advantages_by_power_type, get_cases_by_track,
     get_brochure_by_power_type, get_storage_brochure, get_case_workflow_rules,
     get_ring_case_for_email, get_arlo_case_for_email, get_eufy_case_for_email
 )
@@ -371,20 +371,24 @@ class CustomerClassifier:
 
 class AdvantageSelector:
     """节点3: 优势点提炼 - 从完整素材库筛选匹配优势"""
-    
+
+    def __init__(self, user_id: int = None, is_admin: bool = False):
+        self.user_id = user_id
+        self.is_admin = is_admin
+
     def select(self, classification: Dict, research_result: Dict) -> List[Dict]:
         """
         从素材库筛选与客户最匹配的优势点
         """
         print(f"\n[节点3] 优势点提炼（调用完整素材库）")
-        
+
         power_type = classification['power_type']
         track = classification['track']
         pain_points = research_result.get('module3_pain_points', [])
         pain_types = [p['type'] for p in pain_points]
-        
+
         # 从素材库获取对应功率类型的优势
-        advantages = get_advantages_by_power_type(power_type)
+        advantages = get_advantages_by_power_type(power_type, user_id=self.user_id, admin=self.is_admin)
         
         # 计算每个优势的匹配度
         scored = []
@@ -413,9 +417,10 @@ class AdvantageSelector:
 
 class FABETransformer:
     """节点4: FABE法则实践 - 将优势转化为客户利益话术（基于素材库）"""
-    
-    def __init__(self):
-        pass  # 证据素材已移入 material_library.py
+
+    def __init__(self, user_id: int = None, is_admin: bool = False):
+        self.user_id = user_id
+        self.is_admin = is_admin
     
     def transform(self, advantages: List[Dict], classification: Dict, research_result: Dict) -> List[Dict]:
         """
@@ -506,61 +511,62 @@ class FABETransformer:
         """从素材库匹配证据"""
         name = adv['name'].lower()
         track = classification['track']
-        
+
         # 根据赛道匹配案例
         if 'security' in track.lower() or 'smart home' in track.lower():
             if 'bc' in name or 'cell' in name or '纯黑' in name:
                 # 安防赛道 + BC技术 -> 使用Ring/Arlo案例
-                ring_case = get_ring_case_for_email('smart_home')
-                return ring_case[:200] + '...'
+                ring_case = get_ring_case_for_email('smart_home', user_id=self.user_id, admin=self.is_admin)
+                return ring_case[:200] + '...' if ring_case else ''
             elif 'oem' in name or 'odm' in name or 'custom' in name:
-                ring_case = get_ring_case_for_email('smart_home')
-                return ring_case[:200] + '...'
+                ring_case = get_ring_case_for_email('smart_home', user_id=self.user_id, admin=self.is_admin)
+                return ring_case[:200] + '...' if ring_case else ''
             elif 'ddp' in name or 'logistics' in name:
-                arlo_case = get_arlo_case_for_email('north_america_buyer')
-                return arlo_case[:200] + '...'
+                arlo_case = get_arlo_case_for_email('north_america_buyer', user_id=self.user_id, admin=self.is_admin)
+                return arlo_case[:200] + '...' if arlo_case else ''
             elif 'global' in name or 'production' in name or 'supply' in name:
-                return 'Factories in China, Saudi Arabia, Indonesia, and Vietnam. Flexible multi-country allocation mitigates geopolitical trade risks.'
-        
+                return ''
+
         # 通用证据
         if 'bc' in name or 'cell' in name:
-            return 'BC (Back Contact) no-gridline cell technology. Unobstructed surface absorbs more sunlight, superior low-light performance, premium pure-black appearance.'
+            return ''
         elif 'oem' in name or 'custom' in name:
-            return 'Deep OEM/ODM partner for Amazon, Ring, Arlo, EcoFlow, Jinko Solar. Custom shapes, lightweight, flexible, BIPV all supported.'
+            return ''
         elif 'ddp' in name:
-            return 'DDP (Delivered Duty Paid) service to Los Angeles. We bear all risks, freight, customs, and taxes. Door-to-door delivery.'
+            return ''
         elif 'cert' in name or 'solution' in name:
-            return 'TUV, CE, UL, UKCA, ISO9001, ISO14001, Amazon QSA, SA8000. Full international certifications for global market access.'
-        
-        return 'Niteo Solar: 10+ years industry expertise, serving 50+ countries worldwide'
+            return ''
+
+        return ''
 
 
 class MaterialMatcher:
     """节点5: 素材库智能匹配 - 按规则调用完整素材库"""
     
     def match(self, classification: Dict, research_result: Dict,
-              selected_material_ids: list = None, user_id: int = None) -> Dict:
+              selected_material_ids: list = None, user_id: int = None,
+              admin: bool = False) -> Dict:
         """
         按规则匹配素材，支持用户手动选择素材注入
         """
         print(f"\n[节点5] 素材库智能匹配（调用完整素材库）")
-        
+
         power_type = classification['power_type']
         track = classification['track']
         regions = research_result.get('module1_profile', {}).get('target_markets', [])
-        
+
         matched = {
-            'company_intro': MATERIAL_LIBRARY['company_intro'],
-            'advantages': get_advantages_by_power_type(power_type),
-            'brochure': get_brochure_by_power_type(power_type),
-            'cases': get_cases_by_track(track),
-            'rules': get_case_workflow_rules(track, regions[0] if regions else ''),
+            'company_intro': {},
+            'advantages': get_advantages_by_power_type(power_type, user_id=user_id, admin=admin),
+            'brochure': get_brochure_by_power_type(power_type, user_id=user_id, admin=admin),
+            'cases': get_cases_by_track(track, user_id=user_id, admin=admin),
+            'rules': get_case_workflow_rules(track, regions[0] if regions else '', user_id=user_id, admin=admin),
             'custom_selected': [],
         }
         
         # 大功率客户额外获取储能素材
         if '大功率' in power_type:
-            matched['storage'] = get_storage_brochure()
+            matched['storage'] = get_storage_brochure(user_id=user_id, admin=admin)
         
         # 用户手动选择的素材（最高优先级）
         if selected_material_ids:
@@ -613,7 +619,7 @@ class EmailComposer:
     def _load_sender_info(self) -> Dict:
         """加载发件人信息（兼容旧版）"""
         from materials.sender_info_service import get_sender_info
-        return get_sender_info()
+        return get_sender_info(user_id=self.user_id)
     
     def compose(self, research_result: Dict, classification: Dict,
                 fabe_points: List[Dict], materials: Dict,
@@ -1161,13 +1167,14 @@ class EmailWorkflow:
     整合8个节点，提供一键生成开发信的功能
     """
     
-    def __init__(self, user_id: int = None, sender_material_id: int = None):
+    def __init__(self, user_id: int = None, sender_material_id: int = None, is_admin: bool = False):
         self.user_id = user_id
         self.sender_material_id = sender_material_id
+        self.is_admin = is_admin
         self.researcher = CompanyResearcher()
         self.classifier = CustomerClassifier()
-        self.advantage_selector = AdvantageSelector()
-        self.fabe_transformer = FABETransformer()
+        self.advantage_selector = AdvantageSelector(user_id=user_id, is_admin=is_admin)
+        self.fabe_transformer = FABETransformer(user_id=user_id, is_admin=is_admin)
         self.material_matcher = MaterialMatcher()
         self.composer = EmailComposer(user_id=user_id, sender_material_id=sender_material_id)
         self.refiner = EmailRefiner()
@@ -1330,9 +1337,9 @@ class EmailWorkflow:
         print(f"\n[节点3] 优势提炼 (LLM)")
         _notify('advantage', 'running')
         # 构建素材库文本摘要
-        from materials.unified_interface import MATERIAL_LIBRARY, get_advantages_by_power_type
+        from materials.unified_interface import get_advantages_by_power_type
         power_type = classification.get('power_type', 'High Power')
-        raw_advantages = get_advantages_by_power_type(power_type)
+        raw_advantages = get_advantages_by_power_type(power_type, user_id=self.user_id, admin=self.is_admin)
         material_summary = '\n'.join([
             f"- {a.get('name', '')}: {a.get('tech_features', '')} (Scope: {a.get('scope', '')})"
             for a in raw_advantages
@@ -1372,7 +1379,7 @@ class EmailWorkflow:
             materials = self.material_matcher.match(
                 classification, research_result,
                 selected_material_ids=selected_material_ids,
-                user_id=self.user_id
+                user_id=self.user_id, admin=self.is_admin
             )
         _notify('material', 'completed')
 
@@ -1519,7 +1526,7 @@ class EmailWorkflow:
         materials = self.material_matcher.match(
             classification, research_result,
             selected_material_ids=selected_material_ids,
-            user_id=self.user_id
+            user_id=self.user_id, admin=self.is_admin
         )
 
         # 节点6: 开发信生成（传入 has_website 控制措辞）

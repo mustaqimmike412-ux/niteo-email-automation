@@ -83,10 +83,10 @@ def get_materials_by_type(material_type: str, user_id: int = None, admin: bool =
     return sorted(results, key=lambda x: x.get('priority', 0), reverse=True)
 
 
-def get_advantages_by_power_type_db(power_type: str) -> List[Dict]:
-    """根据功率类型获取优势列表（数据库版）"""
+def get_advantages_by_power_type_db(power_type: str, user_id=None, admin=False) -> List[Dict]:
+    """根据功率类型获取优势列表（数据库版，支持 user_id 隔离）"""
     scope = 'small_power' if power_type == 'Low Power' else 'large_power'
-    materials = get_materials_by_type('advantage')
+    materials = get_materials_by_type('advantage', user_id=user_id, admin=admin)
     result = []
     for mat in materials:
         content = mat['content']
@@ -96,9 +96,9 @@ def get_advantages_by_power_type_db(power_type: str) -> List[Dict]:
     return result[:4]
 
 
-def get_cases_by_track_db(track: str) -> List[Dict]:
-    """根据赛道获取案例列表（数据库版）"""
-    materials = get_materials_by_type('case_study')
+def get_cases_by_track_db(track: str, user_id=None, admin=False) -> List[Dict]:
+    """根据赛道获取案例列表（数据库版，支持 user_id 隔离）"""
+    materials = get_materials_by_type('case_study', user_id=user_id, admin=admin)
     result = []
     for mat in materials:
         if mat.get('track') and mat['track'].lower() in track.lower():
@@ -106,10 +106,10 @@ def get_cases_by_track_db(track: str) -> List[Dict]:
     return result
 
 
-def get_brochure_by_power_type_db(power_type: str) -> Dict:
-    """根据功率类型获取宣传册素材（数据库版）"""
+def get_brochure_by_power_type_db(power_type: str, user_id=None, admin=False) -> Dict:
+    """根据功率类型获取宣传册素材（数据库版，支持 user_id 隔离）"""
     scope = 'small_power' if power_type == 'Low Power' else 'large_power'
-    materials = get_materials_by_type('brochure')
+    materials = get_materials_by_type('brochure', user_id=user_id, admin=admin)
     result = {}
     for mat in materials:
         content = mat['content']
@@ -119,18 +119,18 @@ def get_brochure_by_power_type_db(power_type: str) -> Dict:
     return result
 
 
-def get_storage_brochure_db() -> Dict:
-    """获取储能宣传册素材（数据库版）"""
-    materials = get_materials_by_type('storage')
+def get_storage_brochure_db(user_id=None, admin=False) -> Dict:
+    """获取储能宣传册素材（数据库版，支持 user_id 隔离）"""
+    materials = get_materials_by_type('storage', user_id=user_id, admin=admin)
     result = {}
     for mat in materials:
         result[mat['material_key']] = mat['content']
     return result
 
 
-def get_case_workflow_rules_db(track: str, region: str = "") -> Dict:
-    """获取案例调用规则（数据库版）"""
-    materials = get_materials_by_type('rule')
+def get_case_workflow_rules_db(track: str, region: str = "", user_id=None, admin=False) -> Dict:
+    """获取案例调用规则（数据库版，支持 user_id 隔离）"""
+    materials = get_materials_by_type('rule', user_id=user_id, admin=admin)
     track_rules = {}
     for mat in materials:
         if mat.get('track') == track:
