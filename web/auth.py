@@ -93,7 +93,10 @@ def google_callback():
     """Google OAuth 回调处理"""
     try:
         token = oauth.google.authorize_access_token()
-        userinfo = token.get('userinfo')
+
+        # 通过 userinfo endpoint 获取用户信息
+        resp = oauth.google.get('https://openidconnect.googleapis.com/v1/userinfo')
+        userinfo = resp.json()
 
         if not userinfo:
             return redirect('/login.html?error=oauth_failed')
@@ -127,6 +130,8 @@ def google_callback():
         return redirect('/')
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"[OAuth Error] {e}")
         return redirect('/login.html?error=oauth_error')
 
