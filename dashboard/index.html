@@ -6116,12 +6116,12 @@
     async function loadSenderMaterialOptions() {
         const data = await api('/api/materials/sender-info/list');
         const select = document.getElementById('sender-material-select');
-        if (!data || !data.data || data.data.length === 0) {
+        if (!data || !data.length) {
             select.innerHTML = '<option value="">使用默认发信人</option>';
             return;
         }
         select.innerHTML = '<option value="">使用默认发信人</option>' +
-            data.data.map(s => `<option value="${s.id}">${esc(s.sender_name)} · ${esc(s.job_title || '')} · ${esc(s.company_name || '')}</option>`).join('');
+            data.map(s => `<option value="${s.id}">${esc(s.sender_name || s.name)} · ${esc(s.job_title || '')} · ${esc(s.company_name || '')}</option>`).join('');
     }
 
     function onSenderMaterialChange() {
@@ -6151,7 +6151,7 @@
         const data = await api('/api/materials/selector');
         const container = document.getElementById('send-material-list');
         const empty = document.getElementById('send-material-empty');
-        if (!data || !data.data || data.data.length === 0) {
+        if (!data || !data.length) {
             container.style.display = 'none';
             empty.style.display = 'block';
             empty.textContent = '暂无可用资料';
@@ -6161,7 +6161,7 @@
         container.style.display = 'block';
 
         const groups = {};
-        data.data.forEach(m => {
+        data.forEach(m => {
             if (!groups[m.material_type]) groups[m.material_type] = [];
             groups[m.material_type].push(m);
         });
@@ -6991,12 +6991,12 @@
     async function loadSchSenderMaterials() {
         const data = await api('/api/materials/sender-info/list');
         const select = document.getElementById('sch-sender-material-select');
-        if (!data || !data.data || data.data.length === 0) {
+        if (!data || !data.length) {
             select.innerHTML = '<option value="">使用默认发信人</option>';
             return;
         }
         select.innerHTML = '<option value="">使用默认发信人</option>' +
-            data.data.map(s => `<option value="${s.id}">${esc(s.sender_name || s.name)} · ${esc(s.job_title || '')} · ${esc(s.company_name || '')}</option>`).join('');
+            data.map(s => `<option value="${s.id}">${esc(s.sender_name || s.name)} · ${esc(s.job_title || '')} · ${esc(s.company_name || '')}</option>`).join('');
     }
 
     function onSchSenderMaterialChange() {
@@ -7024,7 +7024,7 @@
         const data = await api('/api/materials/selector');
         const container = document.getElementById('sch-material-list');
         const empty = document.getElementById('sch-material-empty');
-        if (!data || !data.data || data.data.length === 0) {
+        if (!data || !data.length) {
             container.style.display = 'none';
             empty.style.display = 'block';
             return;
@@ -7033,7 +7033,7 @@
         container.style.display = 'block';
 
         const groups = {};
-        data.data.forEach(m => {
+        data.forEach(m => {
             if (!groups[m.material_type]) groups[m.material_type] = [];
             groups[m.material_type].push(m);
         });
