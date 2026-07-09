@@ -1610,25 +1610,30 @@
                                         <div class="info-row"><span class="k">客户</span><span class="v" id="send-cust-name">-</span></div>
                                         <div class="info-row"><span class="k">已选邮箱</span><span class="v" id="send-cust-emails">-</span></div>
                                     </div>
-                                    <!-- 发信人选择器 -->
-                                    <div style="margin-bottom:16px;padding:14px;background:var(--bg);border-radius:12px;border:1px solid var(--surface-2)">
-                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                                            <label style="font-size:0.85rem;color:var(--text-2);font-weight:600">📝 发信人</label>
-                                            <span id="sender-selector-status" style="font-size:0.78rem;color:var(--text-3)">默认</span>
-                                        </div>
-                                        <select id="sender-material-select" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;background:var(--surface)" onchange="onSenderMaterialChange()">
-                                            <option value="">使用默认发信人</option>
-                                        </select>
-                                        <div id="sender-material-preview" style="margin-top:8px;font-size:0.78rem;color:var(--text-3);display:none"></div>
-                                    </div>
                                     <!-- 资料选择器 -->
                                     <div style="margin-bottom:16px;padding:14px;background:var(--bg);border-radius:12px;border:1px solid var(--surface-2)">
                                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                                            <label style="font-size:0.85rem;color:var(--text-2);font-weight:600">📚 关联资料（可选）</label>
+                                            <label style="font-size:0.85rem;color:var(--text-2);font-weight:600">📚 关联资料</label>
                                             <span id="material-selector-status" style="font-size:0.78rem;color:var(--text-3)">未选择</span>
                                         </div>
-                                        <div id="send-material-list" style="max-height:180px;overflow-y:auto;display:none"></div>
-                                        <div id="send-material-empty" style="font-size:0.8rem;color:var(--text-3);text-align:center;padding:12px">选择客户后加载可用资料...</div>
+                                        <!-- 个人信息 -->
+                                        <div style="margin-bottom:12px">
+                                            <div style="font-size:0.8rem;color:var(--text-3);font-weight:600;margin-bottom:6px">👤 个人信息</div>
+                                            <div id="send-material-personal"></div>
+                                            <div id="send-material-personal-empty" style="font-size:0.78rem;color:var(--text-3);text-align:center;padding:8px;display:none">暂无个人信息资料</div>
+                                        </div>
+                                        <!-- 公司简介 -->
+                                        <div style="margin-bottom:12px">
+                                            <div style="font-size:0.8rem;color:var(--text-3);font-weight:600;margin-bottom:6px">🏢 公司简介</div>
+                                            <div id="send-material-company"></div>
+                                            <div id="send-material-company-empty" style="font-size:0.78rem;color:var(--text-3);text-align:center;padding:8px;display:none">暂无公司简介资料</div>
+                                        </div>
+                                        <!-- 产品资料 -->
+                                        <div style="margin-bottom:12px">
+                                            <div style="font-size:0.8rem;color:var(--text-3);font-weight:600;margin-bottom:6px">📦 产品资料</div>
+                                            <div id="send-material-product"></div>
+                                            <div id="send-material-product-empty" style="font-size:0.78rem;color:var(--text-3);text-align:center;padding:8px;display:none">暂无产品资料</div>
+                                        </div>
                                         <div id="send-selected-material-tags" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;min-height:28px"></div>
                                     </div>
                                     <!-- 字数控制 -->
@@ -1866,28 +1871,30 @@
                         </div>
                     </div>
 
-                    <!-- 关联资料选择（发信人 + 素材） -->
-                    <div style="display:grid;grid-template-columns:1fr 2fr;gap:20px;margin-bottom:20px">
-                        <div class="card">
-                            <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
-                                <h3>👤 发信人</h3>
-                                <span id="sch-sender-selector-status" style="font-size:0.75rem;color:var(--muted)">默认</span>
-                            </div>
-                            <div class="card-body">
-                                <select class="form-input" id="sch-sender-material-select" onchange="onSchSenderMaterialChange()" style="margin-bottom:8px">
-                                    <option value="">使用默认发信人</option>
-                                </select>
-                                <div id="sch-sender-material-preview" style="display:none;font-size:0.8rem;color:var(--text-3);padding:8px;background:var(--surface);border-radius:8px"></div>
-                            </div>
+                    <!-- 关联资料选择 -->
+                    <div class="card" style="margin-bottom:20px">
+                        <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+                            <h3>📎 关联资料</h3>
+                            <span id="sch-material-selector-status" style="font-size:0.75rem;color:var(--muted)">未选择</span>
                         </div>
-                        <div class="card">
-                            <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
-                                <h3>📎 关联资料</h3>
-                                <span id="sch-material-selector-status" style="font-size:0.75rem;color:var(--muted)">未选择</span>
+                        <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+                            <!-- 个人信息 -->
+                            <div>
+                                <div style="font-size:0.85rem;color:var(--text-2);font-weight:600;margin-bottom:8px">👤 个人信息</div>
+                                <div id="sch-material-personal" style="max-height:220px;overflow-y:auto"></div>
+                                <div id="sch-material-personal-empty" style="display:none" class="empty"><div class="icon">👤</div><div class="title">暂无个人信息</div></div>
                             </div>
-                            <div class="card-body" style="max-height:250px;overflow-y:auto">
-                                <div id="sch-material-list"></div>
-                                <div id="sch-material-empty" style="display:none" class="empty"><div class="icon">📎</div><div class="title">暂无可用资料</div><div class="desc">请先在资料管理库中添加资料</div></div>
+                            <!-- 公司简介 -->
+                            <div>
+                                <div style="font-size:0.85rem;color:var(--text-2);font-weight:600;margin-bottom:8px">🏢 公司简介</div>
+                                <div id="sch-material-company" style="max-height:220px;overflow-y:auto"></div>
+                                <div id="sch-material-company-empty" style="display:none" class="empty"><div class="icon">🏢</div><div class="title">暂无公司简介</div></div>
+                            </div>
+                            <!-- 产品资料 -->
+                            <div>
+                                <div style="font-size:0.85rem;color:var(--text-2);font-weight:600;margin-bottom:8px">📦 产品资料</div>
+                                <div id="sch-material-product" style="max-height:220px;overflow-y:auto"></div>
+                                <div id="sch-material-product-empty" style="display:none" class="empty"><div class="icon">📦</div><div class="title">暂无产品资料</div></div>
                             </div>
                         </div>
                     </div>
@@ -6113,75 +6120,48 @@
         return hours + ' 小时 ' + mins + ' 分';
     }
 
-    async function loadSenderMaterialOptions() {
-        const data = await api('/api/materials/sender-info/list');
-        const select = document.getElementById('sender-material-select');
-        if (!data || !data.length) {
-            select.innerHTML = '<option value="">使用默认发信人</option>';
-            return;
-        }
-        select.innerHTML = '<option value="">使用默认发信人</option>' +
-            data.map(s => `<option value="${s.id}">${esc(s.sender_name || s.name)} · ${esc(s.job_title || '')} · ${esc(s.company_name || '')}</option>`).join('');
-    }
+    const PERSONAL_TYPES = ['personal_info', 'sender_info'];
+    const COMPANY_TYPES = ['company_intro'];
+    const PRODUCT_TYPES = ['advantage', 'brochure', 'case_study', 'storage', 'rule'];
 
-    function onSenderMaterialChange() {
-        const select = document.getElementById('sender-material-select');
-        const preview = document.getElementById('sender-material-preview');
-        const status = document.getElementById('sender-selector-status');
-        const val = select.value;
-        if (val) {
-            const text = select.options[select.selectedIndex].text;
-            preview.textContent = text;
-            preview.style.display = 'block';
-            status.textContent = '已选择';
-        } else {
-            preview.style.display = 'none';
-            status.textContent = '默认';
-        }
-    }
-
-    function getSelectedSenderMaterialId() {
-        const select = document.getElementById('sender-material-select');
-        return select ? parseInt(select.value) || null : null;
-    }
-
-    async function loadSendPageMaterials() {
-        // 同时加载发信人选项
-        loadSenderMaterialOptions();
-        const data = await api('/api/materials/selector');
-        const container = document.getElementById('send-material-list');
-        const empty = document.getElementById('send-material-empty');
-        if (!data || !data.length) {
+    function renderMaterialZone(items, containerId, emptyId) {
+        const container = document.getElementById(containerId);
+        const empty = document.getElementById(emptyId);
+        if (!items || !items.length) {
+            container.innerHTML = '';
             container.style.display = 'none';
             empty.style.display = 'block';
-            empty.textContent = '暂无可用资料';
             return;
         }
         empty.style.display = 'none';
         container.style.display = 'block';
-
-        const groups = {};
-        data.forEach(m => {
-            if (!groups[m.material_type]) groups[m.material_type] = [];
-            groups[m.material_type].push(m);
-        });
-
-        container.innerHTML = Object.entries(groups).map(([type, items]) => `
-            <div style="margin-bottom:10px">
-                <div style="font-size:0.75rem;color:var(--text-3);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">${MATERIAL_TYPE_LABELS[type] || type}</div>
-                <div style="display:flex;flex-direction:column;gap:6px">
-                    ${items.map(m => `
-                        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--surface);border:1.5px solid var(--border);cursor:pointer;transition:all .15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-                            <input type="checkbox" value="${m.id}" onchange="toggleSendMaterial(${m.id}, '${esc(m.name)}')" ${selectedMaterialIds.includes(m.id) ? 'checked' : ''}>
-                            <div style="flex:1;min-width:0">
-                                <div style="font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}</div>
-                                <div style="font-size:0.72rem;color:var(--text-3);margin-top:1px">${esc(m.summary || '').substring(0,40)}${(m.summary||'').length>40?'...':''}</div>
-                            </div>
-                        </label>
-                    `).join('')}
+        container.innerHTML = items.map(m => `
+            <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--surface);border:1.5px solid var(--border);cursor:pointer;transition:all .15s;margin-bottom:6px" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+                <input type="checkbox" value="${m.id}" onchange="toggleSendMaterial(${m.id}, '${esc(m.name)}')" ${selectedMaterialIds.includes(m.id) ? 'checked' : ''}>
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}</div>
+                    <div style="font-size:0.72rem;color:var(--text-3);margin-top:1px">${esc(m.summary || '').substring(0,40)}${(m.summary||'').length>40?'...':''}</div>
                 </div>
-            </div>
+            </label>
         `).join('');
+    }
+
+    async function loadSendPageMaterials() {
+        const data = await api('/api/materials/selector');
+        if (!data || !data.length) {
+            renderMaterialZone([], 'send-material-personal', 'send-material-personal-empty');
+            renderMaterialZone([], 'send-material-company', 'send-material-company-empty');
+            renderMaterialZone([], 'send-material-product', 'send-material-product-empty');
+            return;
+        }
+
+        const personal = data.filter(m => PERSONAL_TYPES.includes(m.material_type));
+        const company = data.filter(m => COMPANY_TYPES.includes(m.material_type));
+        const product = data.filter(m => PRODUCT_TYPES.includes(m.material_type));
+
+        renderMaterialZone(personal, 'send-material-personal', 'send-material-personal-empty');
+        renderMaterialZone(company, 'send-material-company', 'send-material-company-empty');
+        renderMaterialZone(product, 'send-material-product', 'send-material-product-empty');
     }
 
     function toggleSendMaterial(id, name) {
@@ -6599,7 +6579,7 @@
         const res = await api('/api/email/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ customer_id: selectedCustomerId, target_word_count: targetWordCount, selected_material_ids: selectedMaterialIds, sender_material_id: getSelectedSenderMaterialId() })
+            body: JSON.stringify({ customer_id: selectedCustomerId, target_word_count: targetWordCount, selected_material_ids: selectedMaterialIds })
         });
 
         if (!res || !res.task_id) {
@@ -6779,7 +6759,6 @@
                 email_addresses: selectedEmails.map(e => e.address),
                 target_word_count: targetWordCount,
                 selected_material_ids: selectedMaterialIds,
-                sender_material_id: getSelectedSenderMaterialId(),
                 ...sendConfig
             })
         });
@@ -6862,8 +6841,7 @@
                     task_type: 'batch',
                     email_ids: emailIds,
                     send_config: sendConfig,
-                    selected_material_ids: schSelectedMaterialIds,
-                    sender_material_id: getSchSelectedSenderMaterialId()
+                    selected_material_ids: schSelectedMaterialIds
                 })
             });
             if (data && data.task_id) {
@@ -6933,8 +6911,7 @@
         // 加载树状数据
         await loadSchedulerTree();
 
-        // 加载调度器页面的发信人和资料选择器
-        loadSchSenderMaterials();
+        // 加载调度器页面的资料选择器
         loadSchMaterials();
 
         // 加载队列
@@ -6988,72 +6965,44 @@
     // ==================== 调度器资料选择器 ====================
     let schSelectedMaterialIds = [];
 
-    async function loadSchSenderMaterials() {
-        const data = await api('/api/materials/sender-info/list');
-        const select = document.getElementById('sch-sender-material-select');
-        if (!data || !data.length) {
-            select.innerHTML = '<option value="">使用默认发信人</option>';
-            return;
-        }
-        select.innerHTML = '<option value="">使用默认发信人</option>' +
-            data.map(s => `<option value="${s.id}">${esc(s.sender_name || s.name)} · ${esc(s.job_title || '')} · ${esc(s.company_name || '')}</option>`).join('');
-    }
-
-    function onSchSenderMaterialChange() {
-        const select = document.getElementById('sch-sender-material-select');
-        const preview = document.getElementById('sch-sender-material-preview');
-        const status = document.getElementById('sch-sender-selector-status');
-        const val = select.value;
-        if (val) {
-            const text = select.options[select.selectedIndex].text;
-            preview.textContent = text;
-            preview.style.display = 'block';
-            status.textContent = '已选择';
-        } else {
-            preview.style.display = 'none';
-            status.textContent = '默认';
-        }
-    }
-
-    function getSchSelectedSenderMaterialId() {
-        const select = document.getElementById('sch-sender-material-select');
-        return select ? parseInt(select.value) || null : null;
-    }
-
-    async function loadSchMaterials() {
-        const data = await api('/api/materials/selector');
-        const container = document.getElementById('sch-material-list');
-        const empty = document.getElementById('sch-material-empty');
-        if (!data || !data.length) {
+    function renderSchMaterialZone(items, containerId, emptyId) {
+        const container = document.getElementById(containerId);
+        const empty = document.getElementById(emptyId);
+        if (!items || !items.length) {
+            container.innerHTML = '';
             container.style.display = 'none';
             empty.style.display = 'block';
             return;
         }
         empty.style.display = 'none';
         container.style.display = 'block';
-
-        const groups = {};
-        data.forEach(m => {
-            if (!groups[m.material_type]) groups[m.material_type] = [];
-            groups[m.material_type].push(m);
-        });
-
-        container.innerHTML = Object.entries(groups).map(([type, items]) => `
-            <div style="margin-bottom:10px">
-                <div style="font-size:0.75rem;color:var(--text-3);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">${MATERIAL_TYPE_LABELS[type] || type}</div>
-                <div style="display:flex;flex-direction:column;gap:6px">
-                    ${items.map(m => `
-                        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--surface);border:1.5px solid var(--border);cursor:pointer;transition:all .15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-                            <input type="checkbox" value="${m.id}" onchange="toggleSchMaterial(${m.id})" ${schSelectedMaterialIds.includes(m.id) ? 'checked' : ''}>
-                            <div style="flex:1;min-width:0">
-                                <div style="font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}</div>
-                                <div style="font-size:0.72rem;color:var(--text-3);margin-top:1px">${esc(m.summary || '').substring(0,40)}${(m.summary||'').length>40?'...':''}</div>
-                            </div>
-                        </label>
-                    `).join('')}
+        container.innerHTML = items.map(m => `
+            <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--surface);border:1.5px solid var(--border);cursor:pointer;transition:all .15s;margin-bottom:6px" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+                <input type="checkbox" value="${m.id}" onchange="toggleSchMaterial(${m.id})" ${schSelectedMaterialIds.includes(m.id) ? 'checked' : ''}>
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}</div>
+                    <div style="font-size:0.72rem;color:var(--text-3);margin-top:1px">${esc(m.summary || '').substring(0,40)}${(m.summary||'').length>40?'...':''}</div>
                 </div>
-            </div>
+            </label>
         `).join('');
+    }
+
+    async function loadSchMaterials() {
+        const data = await api('/api/materials/selector');
+        if (!data || !data.length) {
+            renderSchMaterialZone([], 'sch-material-personal', 'sch-material-personal-empty');
+            renderSchMaterialZone([], 'sch-material-company', 'sch-material-company-empty');
+            renderSchMaterialZone([], 'sch-material-product', 'sch-material-product-empty');
+            return;
+        }
+
+        const personal = data.filter(m => PERSONAL_TYPES.includes(m.material_type));
+        const company = data.filter(m => COMPANY_TYPES.includes(m.material_type));
+        const product = data.filter(m => PRODUCT_TYPES.includes(m.material_type));
+
+        renderSchMaterialZone(personal, 'sch-material-personal', 'sch-material-personal-empty');
+        renderSchMaterialZone(company, 'sch-material-company', 'sch-material-company-empty');
+        renderSchMaterialZone(product, 'sch-material-product', 'sch-material-product-empty');
     }
 
     function toggleSchMaterial(id) {
