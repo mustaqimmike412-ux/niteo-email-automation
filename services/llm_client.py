@@ -193,7 +193,7 @@ Analyze this company and output the JSON."""
             for a in advantages[:4]
         ])
 
-        system_prompt = """You are a B2B sales copywriting expert for a solar energy company (Niteo Solar).
+        system_prompt = """You are a B2B sales copywriting expert for a solar energy company.
 Generate FABE (Feature-Advantage-Benefit-Evidence) selling points for each advantage.
 
 Output ONLY valid JSON array, no markdown. Each item:
@@ -257,6 +257,8 @@ Generate FABE for each advantage."""
         # 默认字数范围
         if target_word_count is None:
             target_word_count = {'min': 150, 'max': 250}
+        elif isinstance(target_word_count, int):
+            target_word_count = {'min': max(target_word_count - 30, 80), 'max': target_word_count + 30}
         min_words = target_word_count.get('min', 150)
         max_words = target_word_count.get('max', 250)
         profile = research_result.get('module1_profile', {})
@@ -279,7 +281,7 @@ Generate FABE for each advantage."""
         cases = materials.get('cases', []) if materials else []
         case_summary = '\n'.join([f"- {c.get('title', c.get('name', 'Case'))}" for c in cases[:2]])
 
-        system_prompt = f"""You are a professional B2B sales representative for Niteo Solar, a solar energy company.
+        system_prompt = f"""You are a professional B2B sales representative for {company_info.get('company_name', 'our company')}, a solar energy company.
 Write a personalized cold email to a potential customer.
 
 STRICT FORMAT RULES:
@@ -309,7 +311,7 @@ CONTENT RULES:
 - MUST end with a complete CTA (call-to-action) and do NOT truncate the email
 
 Our company info:
-- Name: {company_info.get('company_name', 'Niteo Solar')}
+- Name: {company_info.get('company_name', 'Our Company')}
 - Products: {', '.join(company_info.get('main_products', ['Solar panels, solar power systems, off-grid solutions']))}
 - Years in business: {company_info.get('years_in_business', '10+')}
 - Sender: {company_info.get('sender_name', 'Travis')}
@@ -417,6 +419,8 @@ IMPORTANT: Follow the STRICT FORMAT RULES for greeting and signature exactly as 
         """
         if target_word_count is None:
             target_word_count = {'min': 150, 'max': 250}
+        elif isinstance(target_word_count, int):
+            target_word_count = {'min': max(target_word_count - 30, 80), 'max': target_word_count + 30}
         min_words = target_word_count.get('min', 150)
         max_words = target_word_count.get('max', 250)
 
@@ -614,7 +618,7 @@ Track: {track}
 Power Type: {power_type}
 Pain Points: {pain_summary}
 
-Our Company: {company_info.get('company_name', 'Niteo Solar')}
+Our Company: {company_info.get('company_name', 'Our Company')}
 Our Strengths: {company_info.get('strength1', '')}, {company_info.get('strength2', '')}, {company_info.get('strength3', '')}
 
 Assemble the most relevant sales materials."""
@@ -689,7 +693,7 @@ Generate the HTML email template."""
         company_info = company_info or {}
         greeting_target = contact_name if contact_name and email_type == 'personal' else f'{customer_name} Team'
 
-        system_prompt = """You are a professional B2B sales representative for a solar energy company called Niteo Solar.
+        system_prompt = """You are a professional B2B sales representative for a solar energy company.
 Your task is to write a personalized cold email to a potential customer.
 
 STRICT FORMAT RULES:
