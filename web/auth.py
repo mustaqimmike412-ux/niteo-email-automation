@@ -9,6 +9,7 @@ import sys
 import json
 import time
 import secrets
+import requests
 from functools import wraps
 from flask import Blueprint, redirect, request, session, url_for, jsonify
 
@@ -94,8 +95,21 @@ def google_callback():
     try:
         token = oauth.google.authorize_access_token()
 
-        # 通过 userinfo endpoint 获取用户信息
-        resp = oauth.google.get('https://openidconnect.googleapis.com/v1/userinfo')
+        # 通过 requests 直接请求 userinfo endpoint（不依赖 authlib 内部状态）
+        access_token = token.get('access_token')
+        if not access_token:
+            print(f"[OAuth Error] No access_token in token: {token.keys()}")
+            return redirect('/login.html?error=oauth_failed')
+
+        resp = requests.get(
+            'https://openidconnect.googleapis.com/v1/userinfo',
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=10
+        )
+        if resp.status_code != 200:
+            print(f"[OAuth Error] userinfo endpoint returned {resp.status_code}: {resp.text}")
+            return redirect('/login.html?error=oauth_failed')
+
         userinfo = resp.json()
 
         if not userinfo:
