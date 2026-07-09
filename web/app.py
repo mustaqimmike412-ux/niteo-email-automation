@@ -3990,7 +3990,7 @@ def api_materials_analyze():
     try:
         from services.ai_material_analyzer import AIMaterialAnalyzer, SUPPORTED_EXTENSIONS
 
-        files = request.files.getlist('files')
+        files = request.files.getlist('files') or request.files.getlist('file')
         if not files or not any(f.filename for f in files):
             return jsonify({'success': False, 'error': '未上传文件'}), 400
 
@@ -4056,9 +4056,11 @@ def api_materials_analyze():
 
         return jsonify({
             'success': True,
-            'previews': previews,
-            'total': len(previews),
-            'errors': errors if errors else None
+            'data': {
+                'previews': previews,
+                'total': len(previews),
+                'errors': errors if errors else None
+            }
         })
 
     except Exception as e:
@@ -4190,10 +4192,12 @@ def api_materials_analyze_confirm():
 
         return jsonify({
             'success': True,
-            'results': results,
-            'imported': imported,
-            'skipped': skipped,
-            'failed': failed
+            'data': {
+                'results': results,
+                'imported': imported,
+                'skipped': skipped,
+                'failed': failed
+            }
         })
 
     except Exception as e:

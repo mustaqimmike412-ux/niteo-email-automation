@@ -7919,23 +7919,31 @@
             const fd = new FormData();
             fd.append('file', window._aiFiles[i]);
             try {
-                const res = await fetch('/api/materials/analyze', { method: 'POST', body: fd });
-                const data = await res.json();
-                window._aiResults.push(data);
-                if (data.success) {
-                    const analysis = data.analysis;
-                    const typeLabel = {
-                        'product_advantage': '产品优势',
-                        'case_study': '案例',
-                        'product_specification': '产品规格',
-                        'company_profile': '公司简介',
-                        'certification': '认证',
-                        'market_research': '市场研究',
-                        'other': '其他'
-                    }[analysis.material_type] || analysis.material_type;
-                    if (statusEl) statusEl.innerHTML = `<span style="color:var(--success)">✓ ${typeLabel}</span>`;
+                const result = await api('/api/materials/analyze', { method: 'POST', body: fd });
+                if (result !== null) {
+                    const previews = result.previews || [];
+                    if (previews.length > 0) {
+                        const preview = previews[0];
+                        const data = { success: true, filename: preview.filename, analysis: preview.raw_analysis || preview };
+                        window._aiResults.push(data);
+                        const typeLabel = {
+                            'product_advantage': '产品优势',
+                            'case_study': '案例',
+                            'product_specification': '产品规格',
+                            'company_profile': '公司简介',
+                            'certification': '认证',
+                            'market_research': '市场研究',
+                            'other': '其他'
+                        }[preview.suggested_type] || preview.suggested_type;
+                        if (statusEl) statusEl.innerHTML = `<span style="color:var(--success)">✓ ${typeLabel}</span>`;
+                    } else {
+                        const err = result.errors ? result.errors[0] : '分析失败';
+                        window._aiResults.push({ success: false, error: err });
+                        if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger)">✗ ${err}</span>`;
+                    }
                 } else {
-                    if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger)">✗ ${data.error || '失败'}</span>`;
+                    window._aiResults.push({ success: false, error: '请求失败' });
+                    if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">✗ 请求失败</span>';
                 }
             } catch (e) {
                 window._aiResults.push({ success: false, error: '网络请求失败' });
@@ -8103,18 +8111,15 @@
         }
 
         try {
-            const res = await fetch('/api/materials/analyze/confirm', {
+            const result = await api('/api/materials/analyze/confirm', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ previews: window._aiConfirmData })
             });
-            const data = await res.json();
-            if (data.success) {
-                toast(`导入完成: ${data.imported_count}个导入, ${data.skipped_count}个跳过, ${data.failed_count}个失败`);
+            if (result !== null) {
+                toast(`导入完成: ${result.imported}个导入, ${result.skipped}个跳过, ${result.failed}个失败`);
                 loadMaterials();
                 closeAIImportModal();
-            } else {
-                toast(data.error || '导入失败', 'err');
             }
         } catch (e) {
             toast('网络请求失败', 'err');
