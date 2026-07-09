@@ -7882,7 +7882,9 @@
         window._aiResults = [];
         document.getElementById('ai-file-list').style.display = 'block';
         document.getElementById('ai-preview-area').style.display = 'none';
-        document.getElementById('ai-analyze-btn').disabled = false;
+        const analyzeBtn = document.getElementById('ai-analyze-btn');
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = '开始分析';
         document.getElementById('ai-import-btn').style.display = 'none';
 
         const container = document.getElementById('ai-file-items');
@@ -7899,7 +7901,9 @@
         window._aiResults = [];
         document.getElementById('ai-file-list').style.display = 'none';
         document.getElementById('ai-preview-area').style.display = 'none';
-        document.getElementById('ai-analyze-btn').disabled = true;
+        const analyzeBtn = document.getElementById('ai-analyze-btn');
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = '开始分析';
         document.getElementById('ai-import-btn').style.display = 'none';
         let input = document.getElementById('ai-file-input');
         if (input) input.value = '';
