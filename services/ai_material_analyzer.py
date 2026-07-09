@@ -43,6 +43,9 @@ SUPPORTED_EXTENSIONS = {
     '.html', '.htm', '.pptx'
 }
 
+# 全局语言配置（默认中文，后期可通过数据库或配置文件修改，无需前端按钮）
+DEFAULT_LANGUAGE = os.environ.get('AI_ANALYSIS_LANGUAGE', 'zh')  # 'zh' 或 'en'
+
 
 class AIMaterialAnalyzer:
     """AI素材分析器"""
@@ -142,7 +145,63 @@ class AIMaterialAnalyzer:
 
     def _call_llm_analysis(self, text: str, filename: str) -> Tuple[Optional[Dict], Optional[str]]:
         """调用LLM进行素材分析"""
-        system_prompt = """You are a professional B2B solar energy material analyst for Niteo Solar.
+        lang = DEFAULT_LANGUAGE
+
+        if lang == 'zh':
+            system_prompt = """你是 Niteo Solar 的 B2B 太阳能材料分析专家。
+你的任务是分析文档内容并将其分类到素材库系统中。
+
+素材库包含以下类别：
+1. product_advantage: 产品技术特性、性能数据、竞争优势、认证信息
+2. case_study: 客户成功案例、项目参考、安装实例、合作伙伴案例
+3. product_specification: 产品规格、数据表、技术参数、目录/宣传册内容
+4. company_profile: 公司介绍、历史、生产能力、工厂信息
+5. certification: 质量认证（CE、RoHS、UL、TUV、ISO）、合规文件
+6. market_research: 市场分析、行业趋势、竞争对手信息、定价数据
+7. other: 不符合以上类别的内容
+
+请只输出有效的 JSON，不要 markdown，不要解释。JSON 结构：
+{
+  "material_type": "上述类别之一",
+  "name": "简洁的素材名称（中文，最多80字，让使用者一眼看懂）",
+  "summary": "内容摘要（中文，1-3句话，清晰易懂）",
+  "tags": ["标签1", "标签2", "标签3"],
+  "scope": "small_power" | "large_power" | "all",
+  "track": "安防与智能家居硬件" | "户外与便携电源" | "自动化与门禁系统" | "农业与畜牧业" | "储能" | "消费电子" | ""（如不明确则留空）",
+  "region": "欧洲" | "北美" | "亚洲" | "中东" | "非洲" | "南美" | "大洋洲" | ""（如不明确则留空）",
+  "priority": 1-5,
+  "confidence": 0.0-1.0,
+  "structured_content": {
+    "key_points": ["要点1", "要点2", "要点3"],
+    "technical_specs": {"参数名": "值"} 或 {},
+    "products_mentioned": ["产品1"],
+    "customer_value": ["价值1", "价值2"]
+  },
+  "reason": "选择此分类的简要说明（中文）"
+}
+
+规则：
+- 全面分析内容，不要只看标题
+- 如果文档是太阳能产品数据表 → product_specification
+- 如果描述客户项目/安装 → case_study
+- 如果列出技术优势 → product_advantage
+- 标签应为简洁关键词（最多5个，中文）
+- key_points: 提取最重要的3个要点（中文，清晰易懂）
+- technical_specs: 提取关键数值规格，如果没有则 {}
+- products_mentioned: 列出找到的任何具体产品名称/型号
+- customer_value: 提取提到的客户价值/利益（中文）
+- confidence: 你对该分类的确信程度（清晰情况0.7+）
+- priority: 标准素材为3，高价值案例/规格为4，关键差异化内容为5
+- 所有文本字段必须使用中文，让使用者看得清楚、易懂"""
+
+            user_prompt = f"""文件名：{filename}
+
+--- 文档内容 ---
+{text[:8000]}
+
+请分析此文档并将其分类到 Niteo Solar 素材库中。"""
+        else:
+            system_prompt = """You are a professional B2B solar energy material analyst for Niteo Solar.
 Your task is to analyze document content and classify it into the material library system.
 
 The material library has these categories:
@@ -187,13 +246,10 @@ Rules:
 - confidence: how certain you are about this classification (0.7+ for clear cases)
 - priority: 3 for standard materials, 4 for high-value cases/specs, 5 for critical differentiators"""
 
-        # 截取文本（最多8000字符避免超token限制）
-        content_for_analysis = text[:8000]
-
-        user_prompt = f"""Filename: {filename}
+            user_prompt = f"""Filename: {filename}
 
 --- Document Content ---
-{content_for_analysis}
+{text[:8000]}
 
 Analyze this document and classify it for the Niteo Solar material library."""
 
