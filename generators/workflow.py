@@ -1240,7 +1240,7 @@ class EmailWorkflow:
         result = re.sub(r'\n{3,}', '\n\n', result)
         return result
 
-    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None):
+    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None, selected_material_ids=None):
         """使用 DeepSeek V4 Pro 生成邮件（LLM 增强模式）
 
         Args:
@@ -1248,6 +1248,7 @@ class EmailWorkflow:
             website: 客户官网URL
             progress_callback: 进度回调函数，接收(step_id, status)参数
             target_word_count: 目标字数范围 {'min': int, 'max': int}
+            selected_material_ids: 用户手动选中的素材ID列表
         """
         has_website = bool(website and website.strip() and website.strip().startswith('http'))
 
@@ -1327,18 +1328,18 @@ class EmailWorkflow:
 
         # ===== 节点2: 客户分类（LLM）=====
         print(f"\n[节点2] 客户分类 (LLM)")
-        _notify('classify', 'running')
+        _notify('pain_points', 'running')
         classification = self.llm.classify_customer(research_result)
         if classification:
             print(f"  ✓ LLM 分类成功: {classification}")
         else:
             print(f"  ⚠ LLM 分类失败，回退到规则引擎")
             classification = self.classifier.classify(research_result)
-        _notify('classify', 'completed')
+        _notify('pain_points', 'completed')
 
         # ===== 节点3: 优势提炼（LLM）=====
         print(f"\n[节点3] 优势提炼 (LLM)")
-        _notify('advantage', 'running')
+        _notify('material', 'running')
         # 构建素材库文本摘要
         from materials.unified_interface import get_advantages_by_power_type
         power_type = classification.get('power_type', 'High Power')
@@ -1353,22 +1354,18 @@ class EmailWorkflow:
         else:
             print(f"  ⚠ LLM 优势提炼失败，回退到规则引擎")
             advantages = self.advantage_selector.select(classification, research_result)
-        _notify('advantage', 'completed')
 
         # ===== 节点4: FABE 话术（LLM）=====
         print(f"\n[节点4] FABE 话术 (LLM)")
-        _notify('fabe', 'running')
         fabe_points = self.llm.generate_fabe(advantages, classification, research_result)
         if fabe_points:
             print(f"  ✓ LLM FABE 生成成功: {len(fabe_points)} 个")
         else:
             print(f"  ⚠ LLM FABE 失败，回退到规则引擎")
             fabe_points = self.fabe_transformer.transform(advantages, classification, research_result)
-        _notify('fabe', 'completed')
 
         # ===== 节点5: 素材匹配（LLM）=====
         print(f"\n[节点5] 素材匹配 (LLM)")
-        _notify('material', 'running')
         company_info = {}
         company_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'company_info.json')
         if os.path.exists(company_path):
@@ -1477,7 +1474,7 @@ class EmailWorkflow:
 
         # 判断是否使用 LLM 模式
         if self._should_use_llm():
-            return self._generate_with_llm(customer_name, website, progress_callback, target_word_count)
+            return self._generate_with_llm(customer_name, website, progress_callback, target_word_count, selected_material_ids)
 
         print("=" * 60)
         print("开发信生成工作流 v2.0")
@@ -1485,7 +1482,16 @@ class EmailWorkflow:
         print(f"目标客户: {customer_name}")
         print(f"网站: {website if has_website else '(无)'}")
 
+        # 模板模式进度回调
+        def _notify(step_id, status='running'):
+            if progress_callback:
+                try:
+                    progress_callback(step_id, status)
+                except Exception:
+                    pass
+
         # 节点1: 公司背调（无网站时跳过网站抓取，仅做搜索）
+        _notify('research', 'running')
         if has_website:
             research_result = self.researcher.research(customer_name, website)
         else:
@@ -1515,10 +1521,15 @@ class EmailWorkflow:
                     'case_match': 'none'
                 }
             }
+        _notify('research', 'completed')
 
         # 节点2: 判断客户类型
+        _notify('pain_points', 'running')
         classification = self.classifier.classify(research_result)
+        _notify('pain_points', 'completed')
 
+        # 节点3-5: 优势提炼 / FABE转化 / 素材匹配（合并为 material 步骤）
+        _notify('material', 'running')
         # 节点3: 优势点提炼
         advantages = self.advantage_selector.select(classification, research_result)
 
@@ -1531,12 +1542,17 @@ class EmailWorkflow:
             selected_material_ids=selected_material_ids,
             user_id=self.user_id, admin=self.is_admin
         )
+        _notify('material', 'completed')
 
         # 节点6: 开发信生成（传入 has_website 控制措辞）
+        _notify('compose', 'running')
         email = self.composer.compose(research_result, classification, fabe_points, materials, has_website=has_website)
+        _notify('compose', 'completed')
 
         # 节点7: 邮件内容精修
+        _notify('refine', 'running')
         email = self.refiner.refine(email)
+        _notify('refine', 'completed')
 
         # 节点8: HTML格式渲染
         html = self.renderer.render(email)

@@ -73,13 +73,11 @@ scheduler_instance = EmailScheduler(task_trigger_callback=orchestrator.create_se
 # 发送步骤定义
 SEND_STEPS = [
     {'id': 'research', 'name': '公司背调', 'weight': 25},
-    {'id': 'classify', 'name': '客户分类', 'weight': 10},
-    {'id': 'advantage', 'name': '优势提炼', 'weight': 10},
-    {'id': 'fabe', 'name': 'FABE话术生成', 'weight': 15},
-    {'id': 'material', 'name': '素材匹配', 'weight': 5},
+    {'id': 'pain_points', 'name': '痛点分析', 'weight': 15},
+    {'id': 'material', 'name': '素材匹配', 'weight': 20},
     {'id': 'compose', 'name': '邮件生成', 'weight': 20},
     {'id': 'refine', 'name': '邮件润色', 'weight': 10},
-    {'id': 'send', 'name': 'SMTP发送', 'weight': 5},
+    {'id': 'send', 'name': 'SMTP发送', 'weight': 10},
 ]
 
 # ==================== Security Decorators ====================

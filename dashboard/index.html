@@ -1725,7 +1725,7 @@
                                     <div id="send-progress-bar" style="height:100%;width:0%;background:var(--accent);border-radius:4px;transition:width 0.3s ease"></div>
                                 </div>
                             </div>
-                            <div id="send-progress-steps" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+                            <div id="send-progress-steps" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
                                 <!-- 步骤状态由 JS 动态填充 -->
                             </div>
                             <!-- 发送控制按钮区 -->
@@ -6262,9 +6262,7 @@
     // 发送步骤定义（与后端对应）
     const SEND_STEPS = [
         {id: 'research', name: '公司背调'},
-        {id: 'classify', name: '客户分类'},
-        {id: 'advantage', name: '优势提炼'},
-        {id: 'fabe', name: 'FABE话术'},
+        {id: 'pain_points', name: '痛点分析'},
         {id: 'material', name: '素材匹配'},
         {id: 'compose', name: '邮件生成'},
         {id: 'refine', name: '邮件润色'},
