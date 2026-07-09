@@ -1200,43 +1200,52 @@ class EmailWorkflow:
     def _strip_greeting_and_signature(self, body: str, greeting: str, signature: str) -> str:
         """
         从 LLM 生成的 body 中剥离 greeting 和 signature，只保留纯正文。
-        LLM 的 compose_email 和 refine_email 都会在输出中包含 greeting 和 signature，
-        但我们的架构要求 body 字段只包含纯正文，greeting 和 signature 由编排层单独管理。
+        使用从末尾向前搜索的策略，避免误伤正文中出现的签名关键词。
         """
         lines = body.split('\n')
-        stripped_lines = []
-        skip_mode = 'none'  # 'none' | 'greeting' | 'signature'
+        if not lines:
+            return ''
 
-        # 签名关键词检测
+        # 找签名的起始行（从末尾向前搜索）
         sig_keywords = ['Best regards', 'best regards', 'Regards,', 'regards,',
-                        'Sincerely', 'sincerely']
+                        'Sincerely', 'sincerely', 'Warm regards', 'Best,']
 
-        for line in lines:
-            stripped = line.strip()
-
-            # 检测 greeting 行（以 "Hi " 开头且匹配 greeting 内容）
-            if skip_mode == 'none' and stripped.startswith('Hi ') and (
-                greeting.split()[-1].rstrip(',') in stripped or
-                stripped.rstrip(',').endswith('Team')
-            ):
-                skip_mode = 'greeting'
-                continue
-
-            # 检测签名开始（包含签名关键词）
-            if skip_mode in ('none', 'greeting') and any(kw in stripped for kw in sig_keywords):
-                # 如果这行就是 greeting 本身（如 "Hi XXX Team,"），跳过
-                if stripped.startswith('Hi '):
+        sig_start = len(lines)  # 签名开始的行号
+        for i in range(len(lines) - 1, -1, -1):
+            stripped = lines[i].strip()
+            if not stripped:
+                continue  # 跳过空行
+            if any(kw in stripped for kw in sig_keywords):
+                sig_start = i
+                break
+            # 如果遇到了看起来像签名内容的行（短行 + 常见签名格式），且在最后几行
+            if i >= len(lines) - 5 and len(stripped) < 60 and not stripped.endswith('.'):
+                # 可能是签名中的姓名/职位/公司行
+                if i + 1 < len(lines) and not lines[i + 1].strip():
                     continue
-                skip_mode = 'signature'
+                sig_start = min(sig_start, i)
+                break
+
+        # 找 greeting 的结束行（从开头向后搜索）
+        greeting_end = 0
+        for i, line in enumerate(lines[:min(5, len(lines))]):  # 只检查前5行
+            stripped = line.strip()
+            if not stripped:
+                if greeting_end > 0:
+                    break  # greeting 后的空行表示 greeting 结束
                 continue
+            if greeting_end == 0 and stripped.startswith('Hi ') or stripped.startswith('Dear ') or stripped.startswith('Hello '):
+                greeting_end = i + 1
+            elif greeting_end > 0:
+                # greeting 后的第一个非空非签名行是正文开始
+                if any(kw in stripped for kw in sig_keywords):
+                    break  # 这行是签名关键词，不是正文
+                greeting_end = i + 1
+                break
 
-            # 签名后的所有行都跳过
-            if skip_mode == 'signature':
-                continue
-
-            stripped_lines.append(line)
-
-        result = '\n'.join(stripped_lines).strip()
+        # 提取正文
+        body_lines = lines[greeting_end:sig_start]
+        result = '\n'.join(body_lines).strip()
         # 清理开头和结尾的多余空行
         result = re.sub(r'\n{3,}', '\n\n', result)
         return result
