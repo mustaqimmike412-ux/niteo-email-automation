@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, jsonify, request, send_from_directory, session, redirect
+from flask import Flask, jsonify, request, send_from_directory, session, redirect, g
 from flask_wtf.csrf import CSRFProtect
 
 # 确保能导入项目根目录模块
