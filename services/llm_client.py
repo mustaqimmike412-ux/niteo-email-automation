@@ -274,8 +274,11 @@ Generate FABE for each advantage."""
             for fp in (fabe_points or [])[:3]
         ])
 
-        # 构建痛点摘要
-        pain_summary = '\n'.join([f"- {p.get('desc', '')}" for p in pain_points[:3]])
+        # 构建痛点摘要（兼容字符串列表和字典列表）
+        if pain_points and isinstance(pain_points[0], str):
+            pain_summary = '\n'.join([f"- {p}" for p in pain_points[:3]])
+        else:
+            pain_summary = '\n'.join([f"- {p.get('desc', '')}" for p in (pain_points or [])[:3]])
 
         # 构建素材摘要
         cases = materials.get('cases', []) if materials else []
