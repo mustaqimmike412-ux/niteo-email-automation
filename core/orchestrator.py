@@ -24,7 +24,7 @@ class SendOrchestrator:
         self._queue_manager = queue_manager  # 通过参数注入，避免循环导入
         self._subject_manager = subject_manager_instance or subject_manager
 
-    def create_send_task(self, filter_config, send_config, task_type='scheduled', target_word_count=None):
+    def create_send_task(self, filter_config, send_config, task_type='scheduled', target_word_count=None, user_id=None, sender_material_id=None, num_subjects=0):
         """
         创建发送任务（编排入口）
 
@@ -33,13 +33,19 @@ class SendOrchestrator:
             send_config: 发送配置（传给 SendQueueManager）
             task_type: 任务类型 'scheduled' | 'batch' | 'test'
             target_word_count: 目标字数
+            user_id: 用户ID，用于数据隔离
+            sender_material_id: 指定发信人素材ID
+            num_subjects: 标题数量（0=自动决定）
 
         Returns:
             dict: {'task_id': str, 'total_emails': int, 'total_customers': int}
         """
-        # 1. 筛选客户
-        filter_engine = EmailFilter(filter_config)
-        emails_to_send = filter_engine.filter_customers(filter_config)
+        # 1. 筛选客户（注入 user_id 到 filter_config 以实现数据隔离）
+        filter_config_with_user = dict(filter_config)
+        if user_id is not None:
+            filter_config_with_user['user_id'] = user_id
+        filter_engine = EmailFilter(filter_config_with_user)
+        emails_to_send = filter_engine.filter_customers(filter_config_with_user)
 
         if not emails_to_send:
             return {'task_id': None, 'total_emails': 0, 'total_customers': 0, 'error': '没有符合条件的邮件'}
@@ -62,10 +68,14 @@ class SendOrchestrator:
             country = items[0].get('country', '')
 
             try:
-                # 完整8节点工作流：背调、分类、优势、FABE、生成、润色
-                email_content = self.workflow.generate_email(
+                # 为该客户创建使用指定发信人的工作流
+                task_workflow = EmailWorkflow(user_id=user_id, sender_material_id=sender_material_id, is_admin=(user_id is None))
+
+                # 完整工作流：背调、分类、优势、FABE、生成、排版（调度器跳过润色）
+                email_content = task_workflow.generate_email(
                     customer_name, website or '',
-                    target_word_count=target_word_count
+                    target_word_count=target_word_count,
+                    skip_refine=True
                 )
 
                 # 为每个邮箱构建个性化邮件（先构建基础内容）
@@ -102,7 +112,9 @@ class SendOrchestrator:
                     customer_name=customer_name,
                     country=country,
                     industry='',  # 行业信息可从website_data获取，暂时留空
-                    email_items=email_items_for_customer
+                    email_items=email_items_for_customer,
+                    email_body=email_content['body'],
+                    num_subjects=num_subjects
                 )
 
                 print(f"[编排器] 客户 {customer_name}: 生成 {len(subjects)} 个标题，分配给 {len(items)} 个邮箱")
@@ -127,7 +139,7 @@ class SendOrchestrator:
         self._queue_manager.start_task(task_id)
 
         # 6. 持久化任务元数据
-        self._persist_task_meta(task_id, task_type, all_email_items, send_config)
+        self._persist_task_meta(task_id, task_type, all_email_items, send_config, user_id=user_id)
 
         return {
             'task_id': task_id,
@@ -163,7 +175,7 @@ class SendOrchestrator:
             self._queue_manager = queue_manager
         return self._queue_manager.cancel_task(task_id)
 
-    def _persist_task_meta(self, task_id, task_type, email_items, send_config):
+    def _persist_task_meta(self, task_id, task_type, email_items, send_config, user_id=None):
         """持久化任务元数据到 send_tasks_meta 表"""
         try:
             conn = get_connection()
@@ -177,8 +189,8 @@ class SendOrchestrator:
                     task_id, task_type, status, customer_id, customer_name,
                     total_emails, sent_count, failed_count, current_index, progress,
                     current_step, step_status, email_preview_subject, email_preview_body,
-                    send_config, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    send_config, created_at, updated_at, user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 task_id, task_type, 'running', email_items[0].get('customer_id') if email_items else None,
                 customer_name, len(email_items), 0, 0, 0, 0,
@@ -186,7 +198,8 @@ class SendOrchestrator:
                 email_items[0].get('subject', '') if email_items else '',
                 email_items[0].get('body', '')[:500] if email_items else '',
                 str(send_config),
-                datetime.now().isoformat(), datetime.now().isoformat()
+                datetime.now().isoformat(), datetime.now().isoformat(),
+                user_id
             ))
             conn.commit()
             conn.close()

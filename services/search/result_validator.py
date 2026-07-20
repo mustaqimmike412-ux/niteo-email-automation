@@ -616,3 +616,79 @@ class ResultValidator:
         """公开方法：检查域名是否在黑名单中"""
         passed, _ = self._check_domain_blacklist(url)
         return not passed
+
+    # ========== Layer 6: 地区匹配验证 ==========
+
+    def verify_location_match(self, result_country: str, target_location: str) -> Tuple[bool, str]:
+        """
+        验证搜索结果的实际国家是否匹配用户指定的目标地区。
+        返回 (是否匹配, 原因)
+        """
+        if not target_location or not target_location.strip():
+            return True, 'no_target_location'  # 未指定目标地区，放行
+
+        if not result_country or not result_country.strip():
+            return True, 'country_unknown'  # 实际国家未知，放行（不误杀）
+
+        target_lower = target_location.lower().strip()
+        country_lower = result_country.lower().strip()
+
+        # 获取目标地区的同义词集
+        target_synonyms = set()
+        for key, synonyms in self.COUNTRY_SYNONYMS.items():
+            if target_lower in synonyms or target_lower == key:
+                target_synonyms = synonyms
+                break
+
+        # 如果没找到精确匹配，把目标地区本身加入
+        if not target_synonyms:
+            target_synonyms = {target_lower}
+            # 尝试模糊匹配
+            for key, synonyms in self.COUNTRY_SYNONYMS.items():
+                if target_lower in key or key in target_lower:
+                    target_synonyms = synonyms
+                    break
+
+        # 获取实际国家的同义词集
+        country_synonyms = set()
+        for key, synonyms in self.COUNTRY_SYNONYMS.items():
+            if country_lower in synonyms or country_lower == key:
+                country_synonyms = synonyms
+                break
+
+        # 如果实际国家没有同义词集，用它本身
+        if not country_synonyms:
+            country_synonyms = {country_lower}
+
+        # 检查是否有交集
+        if target_synonyms & country_synonyms:
+            return True, 'matched'
+
+        # 特殊情况：如果目标地区是 "europe" 等宽泛地区
+        broad_regions = {
+            'europe': {'germany', 'france', 'italy', 'spain', 'netherlands', 'poland', 'switzerland',
+                       'sweden', 'norway', 'denmark', 'finland', 'ireland', 'austria', 'belgium',
+                       'portugal', 'czech republic', 'uk', 'united kingdom', 'greece', 'hungary',
+                       'romania', 'bulgaria', 'croatia', 'slovakia', 'slovenia', 'lithuania',
+                       'latvia', 'estonia', 'luxembourg', 'iceland', 'malta', 'cyprus'},
+            'asia': {'china', 'japan', 'south korea', 'korea', 'india', 'thailand', 'vietnam',
+                     'indonesia', 'malaysia', 'singapore', 'philippines', 'taiwan', 'hong kong',
+                     'pakistan', 'bangladesh', 'sri lanka', 'kazakhstan', 'saudi arabia', 'uae',
+                     'israel', 'turkey'},
+            'middle east': {'saudi arabia', 'uae', 'israel', 'turkey', 'egypt', 'qatar', 'kuwait',
+                           'bahrain', 'oman', 'jordan', 'lebanon', 'iran', 'iraq'},
+            'southeast asia': {'thailand', 'vietnam', 'indonesia', 'malaysia', 'singapore',
+                              'philippines', 'myanmar', 'cambodia', 'laos'},
+            'latin america': {'brazil', 'mexico', 'argentina', 'colombia', 'chile', 'peru',
+                             'venezuela', 'ecuador', 'uruguay', 'paraguay', 'bolivia'},
+        }
+
+        for region_name, member_countries in broad_regions.items():
+            if target_lower in self.COUNTRY_SYNONYMS.get(region_name, set()):
+                # 目标是宽泛地区，检查实际国家是否属于该地区
+                for mc in member_countries:
+                    mc_synonyms = self.COUNTRY_SYNONYMS.get(mc, {mc})
+                    if country_synonyms & mc_synonyms:
+                        return True, f'matched_broad_region:{region_name}'
+
+        return False, f'location_mismatch: target={target_location}, actual={result_country}'

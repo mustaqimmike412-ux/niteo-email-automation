@@ -249,9 +249,9 @@ def get_material_usage_logs(page=1, per_page=20, user_id=None, admin=False) -> D
 # ========== CRUD 操作（供 API 使用）==========
 
 def get_materials_list(material_type=None, category=None, scope=None, track=None,
-                       region=None, search=None, active_only=True,
+                       region=None, search=None, tag=None, active_only=True,
                        page=1, per_page=20, user_id=None, admin=False) -> Dict:
-    """获取资料列表（支持筛选、分页、搜索）"""
+    """获取资料列表（支持筛选、分页、搜索、标签筛选）"""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -273,6 +273,10 @@ def get_materials_list(material_type=None, category=None, scope=None, track=None
     if region:
         where_clauses.append("region = ?")
         params.append(region)
+    if tag:
+        # 标签筛选：tags 字段包含该标签（逗号分隔）
+        where_clauses.append("(tags LIKE ? OR tags LIKE ? OR tags = ?)")
+        params.extend([f"%{tag}%", f"%{tag},%", tag])
     if active_only:
         where_clauses.append("is_active = 1")
     if search:
@@ -447,21 +451,27 @@ def get_material_types(user_id: int = None, admin: bool = False) -> List[str]:
     return types
 
 
-def get_material_categories() -> List[str]:
-    """获取所有分类"""
+def get_material_categories(user_id: int = None, admin: bool = False) -> List[str]:
+    """获取所有分类（按用户隔离）"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT category FROM materials WHERE category IS NOT NULL ORDER BY category")
+    if not admin and user_id:
+        cursor.execute("SELECT DISTINCT category FROM materials WHERE category IS NOT NULL AND user_id = ? ORDER BY category", (user_id,))
+    else:
+        cursor.execute("SELECT DISTINCT category FROM materials WHERE category IS NOT NULL ORDER BY category")
     categories = [row[0] for row in cursor.fetchall()]
     conn.close()
     return categories
 
 
-def get_material_tracks() -> List[str]:
-    """获取所有赛道"""
+def get_material_tracks(user_id: int = None, admin: bool = False) -> List[str]:
+    """获取所有赛道（按用户隔离）"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT track FROM materials WHERE track IS NOT NULL ORDER BY track")
+    if not admin and user_id:
+        cursor.execute("SELECT DISTINCT track FROM materials WHERE track IS NOT NULL AND user_id = ? ORDER BY track", (user_id,))
+    else:
+        cursor.execute("SELECT DISTINCT track FROM materials WHERE track IS NOT NULL ORDER BY track")
     tracks = [row[0] for row in cursor.fetchall()]
     conn.close()
     return tracks
@@ -495,6 +505,51 @@ def get_material_stats(user_id: int = None, admin: bool = False) -> Dict:
         'type_counts': type_counts,
         'usage_count': usage_count
     }
+
+
+def get_all_tags(user_id=None, admin=False) -> List[str]:
+    """获取所有不重复的标签列表"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    user_where = " WHERE user_id = ?" if (not admin and user_id) else ""
+    user_params = [user_id] if (not admin and user_id) else []
+
+    cursor.execute(f"SELECT tags FROM materials{user_where}", user_params)
+    all_tags = set()
+    for row in cursor.fetchall():
+        if row[0]:
+            for t in row[0].split(','):
+                t = t.strip()
+                if t:
+                    all_tags.add(t)
+    conn.close()
+    return sorted(list(all_tags))
+
+
+def update_material_tags(material_id: int, tags: List[str], user_id=None, admin=False):
+    """更新素材标签"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # 权限检查
+    if not admin and user_id:
+        cursor.execute("SELECT user_id FROM materials WHERE id = ?", (material_id,))
+        row = cursor.fetchone()
+        if not row or (row[0] != user_id and row[0] is not None):
+            conn.close()
+            return False
+
+    tags_str = ','.join([t.strip() for t in tags if t.strip()]) if tags else ''
+    cursor.execute("""
+        UPDATE materials
+        SET tags = ?, updated_at = datetime('now')
+        WHERE id = ?
+    """, (tags_str, material_id))
+    conn.commit()
+    conn.close()
+    invalidate_cache()
+    return True
 
 
 def update_attachment(material_id: int, attachment_path: str, attachment_type: str, attachment_name: str):

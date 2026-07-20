@@ -86,11 +86,19 @@ class EmailFilter:
         # 但如果 send_status='sent' 或 'failed'，则不应用冷却期（用于查看已发送/失败的记录）
         if send_status not in ('sent', 'failed'):
             # 冷却期逻辑：如果在 cooldown_override 中则跳过冷却检查；否则排除冷却期内已发送的公司
-            conditions.append('''(
-                c.id IN (SELECT customer_id FROM cooldown_override)
-                OR c.id NOT IN (SELECT DISTINCT customer_id FROM email_logs WHERE sent_at >= ?)
-            )''')
-            params.append(cutoff_date)
+            # 按用户隔离：只考虑当前用户的冷却期记录
+            if not admin and user_id:
+                conditions.append('''(
+                    c.id IN (SELECT customer_id FROM cooldown_override WHERE user_id = ?)
+                    OR c.id NOT IN (SELECT DISTINCT customer_id FROM email_logs WHERE sent_at >= ? AND user_id = ?)
+                )''')
+                params.extend([user_id, cutoff_date, user_id])
+            else:
+                conditions.append('''(
+                    c.id IN (SELECT customer_id FROM cooldown_override)
+                    OR c.id NOT IN (SELECT DISTINCT customer_id FROM email_logs WHERE sent_at >= ?)
+                )''')
+                params.append(cutoff_date)
 
         # 按国家筛选（支持多选）
         if countries:
@@ -112,22 +120,37 @@ class EmailFilter:
             conditions.append('e.email_type = ?')
             params.append(email_type)
 
-        # 按发送状态筛选
+        # 按发送状态筛选（按用户隔离 email_logs）
         if send_status == 'unsent':
-            # 从未发送过（或冷却期内未发送）
-            conditions.append(
-                'e.id NOT IN (SELECT DISTINCT email_id FROM email_logs WHERE email_id IS NOT NULL)'
-            )
+            if user_id:
+                conditions.append(
+                    'e.id NOT IN (SELECT DISTINCT email_id FROM email_logs WHERE email_id IS NOT NULL AND (user_id IS NULL OR user_id = ?))'
+                )
+                params.append(user_id)
+            else:
+                conditions.append(
+                    'e.id NOT IN (SELECT DISTINCT email_id FROM email_logs WHERE email_id IS NOT NULL)'
+                )
         elif send_status == 'sent':
-            # 已成功发送过
-            conditions.append(
-                'e.id IN (SELECT DISTINCT email_id FROM email_logs WHERE send_status = "sent" AND email_id IS NOT NULL)'
-            )
+            if user_id:
+                conditions.append(
+                    'e.id IN (SELECT DISTINCT email_id FROM email_logs WHERE send_status = "sent" AND email_id IS NOT NULL AND (user_id IS NULL OR user_id = ?))'
+                )
+                params.append(user_id)
+            else:
+                conditions.append(
+                    'e.id IN (SELECT DISTINCT email_id FROM email_logs WHERE send_status = "sent" AND email_id IS NOT NULL)'
+                )
         elif send_status == 'failed':
-            # 发送失败过
-            conditions.append(
-                'e.id IN (SELECT DISTINCT email_id FROM email_logs WHERE send_status = "failed" AND email_id IS NOT NULL)'
-            )
+            if user_id:
+                conditions.append(
+                    'e.id IN (SELECT DISTINCT email_id FROM email_logs WHERE send_status = "failed" AND email_id IS NOT NULL AND (user_id IS NULL OR user_id = ?))'
+                )
+                params.append(user_id)
+            else:
+                conditions.append(
+                    'e.id IN (SELECT DISTINCT email_id FROM email_logs WHERE send_status = "failed" AND email_id IS NOT NULL)'
+                )
 
         # 按公司名称搜索
         if search_keyword:

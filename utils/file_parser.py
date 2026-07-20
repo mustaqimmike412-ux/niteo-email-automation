@@ -545,5 +545,126 @@ def parse_file(file_path, filename=None):
         return parse_csv(file_path)
     elif ext == '.docx':
         return parse_word(file_path)
+    elif ext == '.pdf':
+        return parse_pdf(file_path)
+    elif ext in ('.pptx', '.ppt'):
+        return parse_pptx(file_path)
     else:
         return [], f"不支持的文件格式: {ext}"
+
+
+def parse_pdf(file_path_or_obj):
+    """
+    解析 PDF 文件
+    优先读取表格，否则提取全文交给 AI 分析
+    返回: ([customer_dict, ...], error_message or None)
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        return [], "未安装 pdfplumber 库，无法解析 PDF 文档"
+
+    try:
+        if isinstance(file_path_or_obj, str):
+            pdf = pdfplumber.open(file_path_or_obj)
+        else:
+            # BytesIO 对象
+            pdf = pdfplumber.open(file_path_or_obj)
+
+        # 优先从表格提取结构化数据
+        all_customers = []
+        for page in pdf.pages:
+            if page.extract_table():
+                for table in page.extract_tables():
+                    if len(table) < 2:
+                        continue
+                    headers = [str(cell).strip() if cell else '' for cell in table[0]]
+                    data = []
+                    for row in table[1:]:
+                        row_data = [str(cell).strip() if cell else '' for cell in row]
+                        if any(row_data):
+                            data.append(row_data)
+                    if data:
+                        df = pd.DataFrame(data, columns=headers)
+                        customers, error = _parse_dataframe(df)
+                        if error:
+                            continue
+                        all_customers.extend(customers)
+
+        if all_customers:
+            pdf.close()
+            return all_customers, None
+
+        # 无表格：提取全文，返回纯文本用于 AI 分析
+        all_text = []
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                all_text.append(text)
+        pdf.close()
+
+        full_text = '\n'.join(all_text).strip()
+        if not full_text:
+            return [], "PDF 文件为空或无法提取文字"
+
+        # 尝试从文本中提取结构化数据
+        paragraphs = [p.strip() for p in full_text.split('\n') if p.strip()]
+        return _parse_paragraphs(paragraphs)
+
+    except Exception as e:
+        return [], f"PDF 解析失败: {str(e)}"
+
+
+def parse_pptx(file_path_or_obj):
+    """
+    解析 PowerPoint 文件（.pptx）
+    提取所有幻灯片文本，尝试结构化解析
+    返回: ([customer_dict, ...], error_message or None)
+    """
+    try:
+        from pptx import Presentation
+    except ImportError:
+        return [], "未安装 python-pptx 库，无法解析 PowerPoint 文档"
+
+    try:
+        if isinstance(file_path_or_obj, str):
+            prs = Presentation(file_path_or_obj)
+        else:
+            prs = Presentation(file_path_or_obj)
+
+        # 收集所有幻灯片文本
+        all_text = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        text = paragraph.text.strip()
+                        if text:
+                            all_text.append(text)
+                # 提取表格
+                if shape.has_table:
+                    table = shape.table
+                    if len(table.rows) >= 2:
+                        headers = [cell.text.strip() for cell in table.rows[0].cells]
+                        data = []
+                        for row in table.rows[1:]:
+                            row_data = [cell.text.strip() for cell in row.cells]
+                            if any(row_data):
+                                data.append(row_data)
+                        if data:
+                            df = pd.DataFrame(data, columns=headers)
+                            customers, _ = _parse_dataframe(df)
+                            # 如果表格解析成功，直接返回
+                            if customers:
+                                return customers, None
+
+        full_text = '\n'.join(all_text).strip()
+        if not full_text:
+            return [], "PowerPoint 文件中未找到文本内容"
+
+        # 尝试从段落中提取
+        paragraphs = [p.strip() for p in full_text.split('\n') if p.strip()]
+        return _parse_paragraphs(paragraphs)
+
+    except Exception as e:
+        return [], f"PowerPoint 解析失败: {str(e)}"

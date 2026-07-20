@@ -105,11 +105,11 @@ class SearchTaskEngine:
         enriched_count = 0
         imported_count = 0
 
-        # 加载拉黑名单
+        # 加载拉黑名单（按用户隔离）
         try:
             from database.search_models import get_blacklisted_websites, get_blacklisted_names
-            blacklist_websites = get_blacklisted_websites()
-            blacklist_names = get_blacklisted_names()
+            blacklist_websites = get_blacklisted_websites(user_id=user_id)
+            blacklist_names = get_blacklisted_names(user_id=user_id)
             print(f"[SearchEngine] 加载拉黑名单: {len(blacklist_websites)} 个域名, {len(blacklist_names)} 个公司名")
         except Exception:
             blacklist_websites = set()
@@ -150,7 +150,7 @@ class SearchTaskEngine:
                     searcher = self.registry.get_searcher(platform, config)
                     if not searcher.is_available():
                         return []
-                    results = searcher.search(q, location, min(max_results * 3, 30))
+                    results = searcher.search(q, location, min(max_results * 5, 50))
                     # 预验证
                     pre_count = len(results)
                     results = self.validator.run_pre_crawl_validation(results, query, location)
@@ -188,9 +188,11 @@ class SearchTaskEngine:
                     continue
                 deduped_results.append(r)
 
-            if len(deduped_results) > max_results:
+            # 全局上限 = 每平台数量 × 平台数（而非单个 max_results）
+            global_max = max_results * len(platforms)
+            if len(deduped_results) > global_max:
                 deduped_results.sort(key=lambda r: r.confidence_score or 0, reverse=True)
-                all_results = deduped_results[:max_results]
+                all_results = deduped_results[:global_max]
             else:
                 all_results = deduped_results
 
@@ -305,6 +307,41 @@ class SearchTaskEngine:
                 print(f"[SearchEngine] AI分析完成: {enriched_count}/{len(ai_targets)} 条")
                 update_search_task(task_id, ai_enriched_count=enriched_count)
 
+            # ========== 阶段4.5: 地区过滤（AI分析后，用 country 字段验证）==========
+            if location:
+                location_filtered = 0
+                location_rejected = []
+                filtered_results = []
+                for result in all_results:
+                    if result.validation_status == 'rejected':
+                        continue
+                    # 用 AI 提取的 country 验证是否匹配目标地区
+                    matched, match_reason = self.validator.verify_location_match(
+                        result.country, location)
+                    if matched:
+                        filtered_results.append(result)
+                    else:
+                        result.validation_status = 'rejected'
+                        result.validation_reason = match_reason
+                        location_rejected.append(result)
+                        location_filtered += 1
+
+                if location_filtered > 0:
+                    print(f"[SearchEngine] {task_id} 地区过滤: 移除 {location_filtered} 条不匹配 '{location}' 的结果")
+                    # 如果地区过滤后结果严重不足（低于目标的 50%），回填高置信度的被拒结果
+                    min_target = max(max_results, max_results * len(platforms) // 2)
+                    if len(filtered_results) < min_target and location_rejected:
+                        location_rejected.sort(key=lambda r: r.confidence_score or 0, reverse=True)
+                        refill_count = min(len(location_rejected), min_target - len(filtered_results))
+                        for i in range(refill_count):
+                            location_rejected[i].validation_status = 'pending'
+                            location_rejected[i].validation_reason = f'地区不匹配但回填(置信度={location_rejected[i].confidence_score})'
+                            filtered_results.append(location_rejected[i])
+                        print(f"[SearchEngine] {task_id} 地区过滤后不足，回填 {refill_count} 条高置信度结果")
+                    all_results = filtered_results
+                    found_count = len(all_results)
+                    update_search_task(task_id, found_count=found_count)
+
             # ========== 阶段5：邮箱搜索 + 批量保存 ==========
             print(f"[SearchEngine] {task_id} 保存 {len(all_results)} 条结果...")
             batch_records = []
@@ -359,14 +396,20 @@ class SearchTaskEngine:
 
             if batch_records:
                 try:
-                    save_search_results_batch(batch_records)
+                    saved = save_search_results_batch(batch_records)
+                    print(f"[SearchEngine] {task_id} 成功保存 {saved} 条结果到数据库")
                 except Exception as e:
-                    print(f"[SearchEngine] 批量保存失败: {e}，回退逐条")
+                    import traceback
+                    print(f"[SearchEngine] {task_id} 批量保存失败: {e}")
+                    traceback.print_exc()
+                    saved_fallback = 0
                     for item in batch_records:
                         try:
                             save_search_result(**item)
-                        except Exception:
-                            pass
+                            saved_fallback += 1
+                        except Exception as e2:
+                            print(f"[SearchEngine] {task_id} 逐条保存也失败: {e2}")
+                    print(f"[SearchEngine] {task_id} 回退逐条保存成功 {saved_fallback}/{len(batch_records)} 条")
 
             pre_filtered = len([r for r in all_results if r.validation_status == 'rejected'])
             update_search_task(

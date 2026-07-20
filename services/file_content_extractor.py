@@ -163,20 +163,31 @@ def extract_from_word(file_path: str) -> Tuple[str, str]:
 def extract_from_pdf(file_path: str) -> Tuple[str, str]:
     """从 PDF 文件中提取文本内容"""
     try:
-        import PyPDF2
+        import pdfplumber
     except ImportError:
-        return "", "未安装 PyPDF2 库"
+        return "", "未安装 pdfplumber 库"
 
     try:
-        with open(file_path, 'rb') as f:
-            pdf_reader = PyPDF2.PdfReader(f)
-            all_text = []
-
-            for page_num, page in enumerate(pdf_reader.pages):
+        all_text = []
+        with pdfplumber.open(file_path) as pdf:
+            for page_num, page in enumerate(pdf.pages):
                 text = page.extract_text()
                 if text and text.strip():
                     all_text.append(f"=== Page {page_num + 1} ===")
                     all_text.append(text.strip())
+                # 也提取表格
+                tables = page.extract_tables()
+                if tables:
+                    for table in tables:
+                        if len(table) >= 2:
+                            table_text = []
+                            for row in table:
+                                row_text = [str(cell).strip() if cell else '' for cell in row]
+                                if any(row_text):
+                                    table_text.append(" | ".join(row_text))
+                            if table_text:
+                                all_text.append("[Table]")
+                                all_text.extend(table_text)
 
         return "\n\n".join(all_text), None
     except Exception as e:
@@ -332,19 +343,31 @@ def _extract_word_from_bytes(file_bytes: bytes) -> Tuple[str, str]:
 def _extract_pdf_from_bytes(file_bytes: bytes) -> Tuple[str, str]:
     """从 PDF 字节数据中提取文本"""
     try:
-        import PyPDF2
+        import pdfplumber
     except ImportError:
-        return "", "未安装 PyPDF2 库"
+        return "", "未安装 pdfplumber 库"
 
     try:
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
         all_text = []
-
-        for page_num, page in enumerate(pdf_reader.pages):
-            text = page.extract_text()
-            if text and text.strip():
-                all_text.append(f"=== Page {page_num + 1} ===")
-                all_text.append(text.strip())
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                text = page.extract_text()
+                if text and text.strip():
+                    all_text.append(f"=== Page {page_num + 1} ===")
+                    all_text.append(text.strip())
+                # 也提取表格
+                tables = page.extract_tables()
+                if tables:
+                    for table in tables:
+                        if len(table) >= 2:
+                            table_text = []
+                            for row in table:
+                                row_text = [str(cell).strip() if cell else '' for cell in row]
+                                if any(row_text):
+                                    table_text.append(" | ".join(row_text))
+                            if table_text:
+                                all_text.append("[Table]")
+                                all_text.extend(table_text)
 
         return "\n\n".join(all_text), None
     except Exception as e:

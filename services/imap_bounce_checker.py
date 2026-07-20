@@ -19,10 +19,42 @@ from database.connection import get_connection
 
 
 class IMAPBounceChecker:
-    def __init__(self, config_file='config/imap_config.json'):
-        self.config = self._load_config(config_file)
+    def __init__(self, config_file='config/imap_config.json', user_id=None):
+        self.config = self._load_config(config_file, user_id=user_id)
 
-    def _load_config(self, config_file):
+    def _load_config(self, config_file, user_id=None):
+        """加载IMAP配置：优先从数据库读取，其次本地配置文件"""
+        # 优先从数据库 user_settings 读取
+        if user_id:
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT setting_json FROM user_settings WHERE user_id = ? AND setting_type = 'imap' ORDER BY updated_at DESC LIMIT 1",
+                    (user_id,)
+                )
+                row = cursor.fetchone()
+                conn.close()
+                if row:
+                    return json.loads(row[0])
+            except Exception:
+                pass
+
+        # 其次读取最新用户的数据库配置
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT setting_json FROM user_settings WHERE setting_type = 'imap' ORDER BY updated_at DESC LIMIT 1"
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                return json.loads(row[0])
+        except Exception:
+            pass
+
+        # 最后回退到本地配置文件
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         config_path = os.path.join(project_root, config_file)
         if os.path.exists(config_path):
@@ -132,6 +164,26 @@ class IMAPBounceChecker:
                     # 查找关联的 email_id 和 customer_id
                     email_id, customer_id = self._find_email_customer(rec['recipient'])
 
+                    # 自动处理退信：禁用邮箱或升级软退信计数
+                    try:
+                        from services.bounce_handler import handle_bounce
+                        diag = rec.get('diagnostic_code', '') or ''
+                        action_info = rec.get('action', '') or ''
+                        reason = f"{diag} {action_info}".strip() or result.get('bounce_subject', '退信')
+                        handler_result = handle_bounce(
+                            rec['recipient'],
+                            bounce_reason=reason,
+                            bounce_type=rec['bounce_type'],
+                            source='imap',
+                            message_id=msg_id
+                        )
+                        if handler_result['action'] == 'disabled':
+                            print(f"  [退信处理] {rec['recipient']}: 已禁用 ({rec['bounce_type']})")
+                        elif handler_result['action'] == 'incremented':
+                            print(f"  [退信处理] {rec['recipient']}: 软退信计数+1")
+                    except Exception as e:
+                        print(f"  [退信处理] 处理失败: {e}")
+
                     save_bounce_log({
                         'message_id': msg_id,
                         'email_log_id': log_id,
@@ -189,5 +241,5 @@ class IMAPBounceChecker:
         return ''.join(decoded)
 
 
-def create_bounce_checker() -> IMAPBounceChecker:
-    return IMAPBounceChecker()
+def create_bounce_checker(user_id=None) -> IMAPBounceChecker:
+    return IMAPBounceChecker(user_id=user_id)

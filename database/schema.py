@@ -574,6 +574,18 @@ def init_database():
     _add_column_safe(cursor, 'api_configs', 'user_id', 'INTEGER')
     _add_column_safe(cursor, 'bounce_logs', 'user_id', 'INTEGER')
 
+    # ==================== 退信追踪：为 emails 表添加退信相关字段 ====================
+    _add_column_safe(cursor, 'emails', 'bounce_status', "TEXT CHECK(bounce_status IN ('none', 'soft', 'hard')) DEFAULT 'none'")
+    _add_column_safe(cursor, 'emails', 'bounce_count', 'INTEGER DEFAULT 0')
+    _add_column_safe(cursor, 'emails', 'last_bounce_at', 'INTEGER')
+    _add_column_safe(cursor, 'emails', 'bounce_reason', 'TEXT')
+
+    # ==================== 数据隔离：为 search_platform_configs 添加 user_id ====================
+    _add_column_safe(cursor, 'search_platform_configs', 'user_id', 'INTEGER')
+
+    # ==================== 数据隔离：为 email_logs_scheduled 添加 user_id ====================
+    _add_column_safe(cursor, 'email_logs_scheduled', 'user_id', 'INTEGER')
+
     # search_results 新增验证字段
     _add_column_safe(cursor, 'search_results', 'validation_status', "TEXT DEFAULT 'pending'")
     _add_column_safe(cursor, 'search_results', 'validation_reason', 'TEXT')
@@ -660,8 +672,9 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_contacts_source ON contacts(source)')
 
     # 邮件规范表
-    from database.email_guidelines_models import init_email_guidelines_table
+    from database.email_guidelines_models import init_email_guidelines_table, migrate_to_multi_user
     init_email_guidelines_table()
+    migrate_to_multi_user()
 
     # 邀请码表
     from database.invite_code_models import init_invite_codes_table
@@ -691,6 +704,95 @@ def init_database():
         )
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_settings_user ON user_settings(user_id, setting_type)')
+
+    # 邮件限定预设表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pc_presets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            preset_json TEXT NOT NULL DEFAULT '{}',
+            is_default INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_pc_presets_user ON pc_presets(user_id)')
+
+    # ==================== 跟进邮件模块表 ====================
+
+    # 跟进序列表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS follow_up_sequences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL,
+            user_id INTEGER,
+            strategy_type TEXT NOT NULL DEFAULT 'standard',
+            total_steps INTEGER NOT NULL DEFAULT 5,
+            current_step INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'draft',
+            first_email_log_id INTEGER,
+            generation_context TEXT,
+            config_json TEXT,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (customer_id) REFERENCES customers(id),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (first_email_log_id) REFERENCES email_logs(id)
+        )
+    ''')
+
+    # 跟进步骤表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS follow_up_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sequence_id INTEGER NOT NULL,
+            step_number INTEGER NOT NULL,
+            purpose TEXT NOT NULL,
+            strategy TEXT,
+            subject_mode TEXT NOT NULL DEFAULT 'reply',
+            interval_days INTEGER NOT NULL DEFAULT 3,
+            subject TEXT,
+            body TEXT,
+            greeting TEXT,
+            signature TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            scheduled_at TIMESTAMP,
+            sent_at TIMESTAMP,
+            email_log_id INTEGER,
+            error_message TEXT,
+            material_ids TEXT,
+            word_count INTEGER DEFAULT 200,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (sequence_id) REFERENCES follow_up_sequences(id) ON DELETE CASCADE,
+            FOREIGN KEY (email_log_id) REFERENCES email_logs(id)
+        )
+    ''')
+
+    # 跟进模块索引
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_sequences_customer ON follow_up_sequences(customer_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_sequences_user ON follow_up_sequences(user_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_sequences_status ON follow_up_sequences(user_id, status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_steps_sequence ON follow_up_steps(sequence_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_steps_status ON follow_up_steps(status, scheduled_at)')
+
+    # email_logs 新增跟进相关字段
+    try:
+        cursor.execute('ALTER TABLE email_logs ADD COLUMN follow_up_sequence_id INTEGER')
+    except Exception:
+        pass  # 字段已存在
+    try:
+        cursor.execute('ALTER TABLE email_logs ADD COLUMN follow_up_step_number INTEGER')
+    except Exception:
+        pass
+    try:
+        cursor.execute('ALTER TABLE email_logs ADD COLUMN is_follow_up INTEGER DEFAULT 0')
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()

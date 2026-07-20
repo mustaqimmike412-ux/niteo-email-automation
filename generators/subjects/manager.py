@@ -4,6 +4,8 @@
 """
 import random
 import re
+import time
+import hashlib
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, field
 
@@ -127,19 +129,19 @@ class SmartSubjectManager:
     def __init__(self):
         self.generated_pools: Dict[int, SubjectPool] = {}
 
-    def calculate_subject_count(self, email_count: int) -> int:
+    def calculate_subject_count(self, email_count: int, user_override: int = 0) -> int:
         """
         根据邮箱数量计算需要生成的标题数量
 
-        规则：
-        - 1-4 个邮箱：生成 2 个标题
-        - 5-10 个邮箱：生成 3 个标题
-        - 11-20 个邮箱：生成 5 个标题
-        - 21+ 个邮箱：生成 ceil(email_count / 4) 个标题（每4个邮箱1个标题）
+        Args:
+            email_count: 邮箱数量
+            user_override: 用户指定的标题数量（0 = 自动决定）
 
         Returns:
             int: 需要生成的标题数量
         """
+        if user_override > 0:
+            return min(max(1, user_override), min(email_count, 20))
         if email_count <= 4:
             return 2
         elif email_count <= 10:
@@ -150,7 +152,9 @@ class SmartSubjectManager:
             return min(15, (email_count + 3) // 4)  # 最多15个标题
 
     def generate_subjects(self, customer_name: str, country: str,
-                          industry: str, email_count: int) -> List[str]:
+                          industry: str, email_count: int,
+                          email_body: str = None,
+                          user_override: int = 0) -> List[str]:
         """
         为客户生成指定数量的备选标题
 
@@ -159,11 +163,13 @@ class SmartSubjectManager:
             country: 国家
             industry: 行业
             email_count: 邮箱数量（用于计算需要多少标题）
+            email_body: 邮件正文（用于生成基于内容的标题）
+            user_override: 用户指定的标题数量（0 = 自动决定）
 
         Returns:
             List[str]: 生成的标题列表
         """
-        subject_count = self.calculate_subject_count(email_count)
+        subject_count = self.calculate_subject_count(email_count, user_override)
 
         # 清理客户名
         clean_name = self._clean_customer_name(customer_name)
@@ -171,8 +177,9 @@ class SmartSubjectManager:
         # 国家名：中文转英文映射，确保英文标题中使用英文国家名
         clean_country = self.COUNTRY_MAP.get(country, country) if country else 'Your Region'
 
-        # 使用客户名作为种子，确保同一客户每次生成结果一致
-        random.seed(hash(clean_name) % 10000)
+        # 使用客户名+日期作为种子：同一客户每天标题不同，防止被标记为垃圾
+        today_seed = int(hashlib.md5(f"{clean_name}_{time.strftime('%Y%m%d')}".encode()).hexdigest()[:8], 16)
+        random.seed(today_seed)
 
         # 从模板池随机选择指定数量的模板（不重复）
         selected_templates = random.sample(self.TEMPLATES,
@@ -189,6 +196,13 @@ class SmartSubjectManager:
             if subject and subject not in subjects:  # 去重
                 subjects.append(subject)
 
+        # 如果有邮件正文，基于内容生成额外标题（从正文提取关键信息）
+        if email_body and len(email_body) > 20:
+            content_subjects = self._generate_subjects_from_body(email_body, clean_name)
+            for cs in content_subjects:
+                if len(subjects) < subject_count and cs not in subjects:
+                    subjects.append(cs)
+
         # 如果生成的数量不够，补充通用标题
         while len(subjects) < subject_count:
             generic = self._generate_generic_subject(clean_name, clean_industry)
@@ -204,7 +218,7 @@ class SmartSubjectManager:
                                    email_items: List[Dict],
                                    subjects: List[str]) -> List[Dict]:
         """
-        将标题分配给各个邮箱，随机打乱避免顺序规律
+        将标题分配给各个邮箱，相邻两封邮件标题不重复
 
         Args:
             customer_id: 客户ID
@@ -223,20 +237,22 @@ class SmartSubjectManager:
                 item['subject_index'] = 0
             return email_items
 
-        # 计算每个标题应该分配多少个邮箱
         email_count = len(email_items)
         subject_count = len(subjects)
+
+        # 计算每个标题应分配的次数
         base_count = email_count // subject_count
         extra = email_count % subject_count
 
-        # 构建分配计划：每个标题分配多少个邮箱
-        assignment_plan = []
+        # 构建标题池：每个标题出现 base_count 或 base_count+1 次
+        pool = []
         for i in range(subject_count):
             count = base_count + (1 if i < extra else 0)
-            assignment_plan.extend([i] * count)
+            pool.extend([i] * count)
 
-        # 随机打乱分配计划（关键：避免顺序规律）
-        random.shuffle(assignment_plan)
+        # 去重洗牌：保证相邻元素不重复
+        # 算法：多次随机尝试，若某次洗牌无相邻重复则采用；超过上限则用贪心修正
+        assignment_plan = self._shuffle_no_adjacent(pool, subjects)
 
         # 分配标题
         result = []
@@ -251,7 +267,9 @@ class SmartSubjectManager:
 
     def generate_and_assign(self, customer_id: int, customer_name: str,
                             country: str, industry: str,
-                            email_items: List[Dict]) -> Tuple[List[str], List[Dict]]:
+                            email_items: List[Dict],
+                            email_body: str = None,
+                            num_subjects: int = 0) -> Tuple[List[str], List[Dict]]:
         """
         一站式生成标题并分配给邮箱
 
@@ -261,12 +279,16 @@ class SmartSubjectManager:
             country: 国家
             industry: 行业
             email_items: 邮箱列表
+            email_body: 邮件正文（用于生成基于内容的标题）
+            num_subjects: 用户指定的标题数量（0 = 自动决定）
 
         Returns:
             Tuple[List[str], List[Dict]]: (生成的标题列表, 分配后的邮箱列表)
         """
         subjects = self.generate_subjects(customer_name, country, industry,
-                                          len(email_items))
+                                          len(email_items),
+                                          email_body=email_body,
+                                          user_override=num_subjects)
         assigned_items = self.assign_subjects_to_emails(
             customer_id, customer_name, email_items, subjects
         )
@@ -279,6 +301,48 @@ class SmartSubjectManager:
         )
 
         return subjects, assigned_items
+
+    def _shuffle_no_adjacent(self, pool: List[int], subjects: List[str]) -> List[int]:
+        """
+        对标题池进行洗牌，保证相邻两封邮件标题不重复。
+
+        策略：
+        1. 如果标题数 >= 2，先尝试随机洗牌（最多100次），若无相邻重复则直接采用
+        2. 若100次都没成功，用贪心算法逐位随机选择与上一个不同的标题
+        3. 如果只有1个标题，无法避免重复，退回简单打乱
+        """
+        if len(subjects) <= 1:
+            random.shuffle(pool)
+            return pool
+
+        # 阶段1：随机洗牌尝试（快速路径）
+        for _ in range(100):
+            candidate = pool[:]
+            random.shuffle(candidate)
+            if all(candidate[i] != candidate[i + 1] for i in range(len(candidate) - 1)):
+                return candidate
+
+        # 阶段2：贪心构建
+        # 统计每个标题的剩余可用次数
+        remaining = {}
+        for idx in set(pool):
+            remaining[idx] = pool.count(idx)
+
+        result = []
+        last_idx = -1
+        for _ in range(len(pool)):
+            # 候选：与上一个不同且还有剩余的标题
+            candidates = [idx for idx, cnt in remaining.items()
+                          if cnt > 0 and idx != last_idx]
+            if not candidates:
+                # 极端情况：只剩一种标题了，只能用它
+                candidates = [idx for idx, cnt in remaining.items() if cnt > 0]
+            chosen = random.choice(candidates)
+            result.append(chosen)
+            remaining[chosen] -= 1
+            last_idx = chosen
+
+        return result
 
     def _clean_customer_name(self, name: str) -> str:
         """清理客户名"""
@@ -328,6 +392,35 @@ class SmartSubjectManager:
             f"Solar Solutions Tailored for {customer_name}",
         ]
         return random.choice(generics)
+
+    def _generate_subjects_from_body(self, email_body: str, customer_name: str) -> List[str]:
+        """从邮件正文提取关键信息，生成基于内容的标题（最多3条）"""
+        sentences = re.split(r'(?<=[.!?])\s+', email_body)
+        subjects = []
+
+        # 提取包含关键信息的句子
+        keywords = ['solar', 'panel', 'efficiency', 'power', 'energy', 'battery',
+                     'storage', 'BC cell', 'black', 'tempered glass', 'DDP',
+                     'warranty', 'cost', 'savings', 'partner', 'integrate',
+                     'solution', 'performance', 'capacity', 'output']
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) < 20 or len(sentence) > 120:
+                continue
+            # 检查是否包含关键词
+            words = sentence.lower().split()
+            if any(kw in words for kw in keywords):
+                # 取前8-12个单词作为标题
+                title_words = words[:min(10, len(words))]
+                title = ' '.join(w.capitalize() if i == 0 else w for i, w in enumerate(title_words))
+                title = self._validate_and_clean(title)
+                if title and title not in subjects:
+                    subjects.append(title)
+                if len(subjects) >= 3:
+                    break
+
+        return subjects
 
     def get_pool_stats(self, customer_id: int) -> Optional[Dict]:
         """获取标题池统计信息"""

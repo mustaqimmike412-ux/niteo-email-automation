@@ -23,6 +23,76 @@ from materials.unified_interface import (
 )
 
 
+# ==================== 字数强制修正工具函数 ====================
+
+def _enforce_word_count(body: str, target: int, min_wc: int, max_wc: int) -> str:
+    """
+    强制将邮件正文修正到 [min_wc, max_wc] 范围内。
+    - 超长：按句子裁剪，保留开头和结尾
+    - 过短：按句子重复扩展最后一段论述
+    """
+    words = body.split()
+    count = len(words)
+
+    if min_wc <= count <= max_wc:
+        return body  # 已在范围内
+
+    if count > max_wc:
+        # 超长：裁剪。保留开头和结尾，压缩中间
+        sentences = re.split(r'(?<=[.!?])\s+', body)
+        if len(sentences) <= 2:
+            # 只有1-2句，直接截断
+            return ' '.join(words[:max_wc])
+        head = sentences[0]
+        tail = ' '.join(sentences[-2:])  # 保留最后两句
+        head_words = len(head.split())
+        tail_words = len(tail.split())
+        mid_budget = max(0, max_wc - head_words - tail_words)
+        mid_sentences = sentences[1:-2]
+        mid_text = ' '.join(mid_sentences)
+        mid_words = mid_text.split()
+        if len(mid_words) > mid_budget:
+            mid_text = ' '.join(mid_words[:mid_budget])
+        result = head + ' ' + mid_text + ' ' + tail
+        # 最终兜底
+        result_words = result.split()
+        if len(result_words) > max_wc:
+            result = ' '.join(result_words[:max_wc])
+        return result
+
+    else:
+        # 过短：扩展。从已有句子中选择最有价值的重复/扩展
+        sentences = re.split(r'(?<=[.!?])\s+', body)
+        if len(sentences) <= 1:
+            # 只有1句，无法智能扩展，填充通用但相关的补充
+            padding_sentences = [
+                "Our solutions are designed to meet the highest industry standards.",
+                "We would welcome the opportunity to discuss how we can support your goals.",
+                "Please feel free to reach out if you have any questions."
+            ]
+            needed = max_wc - count
+            added = []
+            for ps in padding_sentences:
+                if needed <= 0:
+                    break
+                added.append(ps)
+                needed -= len(ps.split())
+            return body + ' ' + ' '.join(added)
+        else:
+            # 重复最后一句论述性句子（通常是CTA或总结）
+            last_substantive = sentences[-2] if len(sentences) >= 2 else sentences[-1]
+            result_words = list(words)
+            while len(result_words) < min_wc:
+                expand_words = last_substantive.split()
+                # 稍微改写避免完全重复
+                result_words.extend(expand_words)
+            result_words = result_words[:max_wc]
+            return ' '.join(result_words)
+
+
+# ==================== 字数强制修正工具函数 END ====================
+
+
 class CompanyResearcher:
     """节点1: 公司背调 - 基于官网完成精准调研"""
     
@@ -635,8 +705,11 @@ class EmailComposer:
             target_word_count: 目标字数范围 {'min': int, 'max': int}
         """
         if target_word_count is None:
-            target_word_count = {'min': 150, 'max': 250}
-        max_words = target_word_count.get('max', 250)
+            target_word_count = {'min': 140, 'max': 160}
+        elif isinstance(target_word_count, int):
+            target_word_count = {'min': max(10, target_word_count - 10), 'max': target_word_count + 10}
+        max_words = target_word_count.get('max', 160)
+        min_words = target_word_count.get('min', 140)
 
         print(f"\n[节点6] 开发信生成")
 
@@ -668,6 +741,13 @@ class EmailComposer:
             'signature': signature,
             'full_text': f"{greeting}\n\n{body}\n\n{signature}"
         }
+
+        # 字数强制修正（规则引擎回退模式）
+        body_words = len(body.split())
+        if body_words < min_words or body_words > max_words:
+            body = _enforce_word_count(body, (min_words + max_words) // 2, min_words, max_words)
+            result['body'] = body
+            result['full_text'] = f"{greeting}\n\n{body}\n\n{signature}"
 
         print(f"  主题: {subject}")
         print(f"  称呼: {greeting}")
@@ -958,7 +1038,8 @@ class EmailComposer:
         return random.choice(ctas)
     
     def _generate_signature(self) -> str:
-        """生成签名（固定格式，分行左对齐，不添加多余符号）"""
+        """生成签名（使用默认格式：姓名 + 职位 + 公司）"""
+        # 使用发件人信息中的姓名、职位、公司拼接签名
         name = self.sender_info.get('sender_name', '')
         title = self.sender_info.get('job_title', '')
         company = self.sender_info.get('company_name', '')
@@ -981,23 +1062,26 @@ class EmailRefiner:
         精修邮件内容
         """
         if target_word_count is None:
-            target_word_count = {'min': 150, 'max': 250}
-        max_words = target_word_count.get('max', 250)
-        
+            target_word_count = {'min': 140, 'max': 160}
+        elif isinstance(target_word_count, int):
+            target_word_count = {'min': max(10, target_word_count - 10), 'max': target_word_count + 10}
+        max_words = target_word_count.get('max', 160)
+        min_words = target_word_count.get('min', 140)
+
         print(f"\n[节点7] 邮件内容精修")
-        
+
         original_body = email['body']
-        
+
         # 精简冗余
         refined_body = self._trim_redundancy(original_body)
-        
+
         # 优化语气
         refined_body = self._optimize_tone(refined_body)
-        
-        # 检查词数（上限）
+
+        # 字数强制修正（上下限都检查）
         word_count = len(refined_body.split())
-        if word_count > max_words:
-            refined_body = self._compress_to_target(refined_body, max_words)
+        if word_count < min_words or word_count > max_words:
+            refined_body = _enforce_word_count(refined_body, (min_words + max_words) // 2, min_words, max_words)
         
         email['body'] = refined_body
         email['full_text'] = f"{email['greeting']}\n\n{refined_body}\n\n{email['signature']}"
@@ -1182,7 +1266,7 @@ class EmailWorkflow:
         self.composer = EmailComposer(user_id=user_id, sender_material_id=sender_material_id)
         self.refiner = EmailRefiner()
         self.renderer = HTMLRenderer()
-        self.llm = LLMEmailClient()
+        self.llm = LLMEmailClient(user_id=user_id)
     
     def _should_use_llm(self):
         """判断是否使用 LLM 模式生成邮件"""
@@ -1197,10 +1281,85 @@ class EmailWorkflow:
             return mode == 'ai'
         return True  # 无配置文件时默认使用 LLM 模式
 
+    def _compress_body_to_target(self, body: str, max_words: int) -> str:
+        """将正文裁剪到目标字数，保留开头和结尾句，从中间删减"""
+        import re
+        sentences = re.split(r'(?<=[.!?])\s+', body)
+        if len(sentences) <= 2:
+            return body
+
+        # 保留首句和末两句
+        head = sentences[0]
+        tail_sentences = sentences[-2:]
+        tail = ' '.join(tail_sentences)
+        mid_budget = max(0, max_words - len(head.split()) - len(tail.split()))
+
+        mid_result = []
+        mid_words = 0
+        for s in sentences[1:-2]:
+            w = len(s.split())
+            if mid_words + w <= mid_budget:
+                mid_result.append(s)
+                mid_words += w
+            else:
+                break
+
+        parts = [head] + mid_result + tail_sentences
+        result = ' '.join(parts)
+        # 确保不超过目标
+        words = result.split()
+        if len(words) > max_words:
+            result = ' '.join(words[:max_words])
+        return result
+
+    def _format_email_body(self, body: str) -> str:
+        """对正文进行排版美化：确保段落间距合理，格式整洁
+
+        - 如果已有段落分隔（连续空行），规范化间距
+        - 如果没有段落，按句子自动分组为 4-5 段
+        - 每段 2-4 个句子
+        """
+        import re
+        body = body.strip()
+
+        # 检查是否已有段落分隔（连续2个以上换行）
+        if re.search(r'\n\n\n*', body):
+            # 已有段落，规范化：每个段落之间空一行，首尾去空行
+            paragraphs = re.split(r'\n{2,}', body)
+            paragraphs = [p.strip() for p in paragraphs if p.strip()]
+            return '\n\n'.join(paragraphs)
+
+        # 没有段落分隔，按句子自动分组
+        sentences = re.split(r'(?<=[.!?])\s+', body)
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        if len(sentences) <= 3:
+            # 句子太少，不分段，只规范化间距
+            return ' '.join(sentences)
+
+        # 根据句子数量决定段落数（4-5段）
+        num_paragraphs = min(5, max(4, len(sentences) // 2))
+        base_size = len(sentences) // num_paragraphs
+        extra = len(sentences) % num_paragraphs
+
+        paragraphs = []
+        idx = 0
+        for i in range(num_paragraphs):
+            size = base_size + (1 if i < extra else 0)
+            if idx < len(sentences):
+                para = ' '.join(sentences[idx:idx + size])
+                paragraphs.append(para)
+                idx += size
+
+        return '\n\n'.join(paragraphs)
+
     def _strip_greeting_and_signature(self, body: str, greeting: str, signature: str) -> str:
         """
         从 LLM 生成的 body 中剥离 greeting 和 signature，只保留纯正文。
-        使用从末尾向前搜索的策略，避免误伤正文中出现的签名关键词。
+        策略：
+        - 签名：从末尾向前搜索，找到签名关键词行后，跳过后续所有行（含名字/职位/公司名）
+        - greeting：从开头向后搜索，跳过 Hi/Dear/Hello 开头的行及其后空行
+        - 额外兜底：body 结尾如果包含签名中的名字行（来自 LLM 自行添加），也一并移除
         """
         lines = body.split('\n')
         if not lines:
@@ -1217,14 +1376,30 @@ class EmailWorkflow:
                 continue  # 跳过空行
             if any(kw in stripped for kw in sig_keywords):
                 sig_start = i
-                break
-            # 如果遇到了看起来像签名内容的行（短行 + 常见签名格式），且在最后几行
-            if i >= len(lines) - 5 and len(stripped) < 60 and not stripped.endswith('.'):
-                # 可能是签名中的姓名/职位/公司行
-                if i + 1 < len(lines) and not lines[i + 1].strip():
+                break  # 只通过关键词匹配定位签名起始行，不再猜测短行
+
+        # 兜底：如果没找到签名关键词，但 body 末尾的行看起来像签名（短行+非句尾），
+        # 尝试移除最后 1-3 行签名块
+        if sig_start == len(lines):
+            # 检查最后几行是否像签名：短行、不以句号结尾、连续出现
+            tail_start = len(lines)
+            for i in range(len(lines) - 1, max(len(lines) - 6, -1), -1):
+                stripped = lines[i].strip()
+                if not stripped:
                     continue
-                sig_start = min(sig_start, i)
-                break
+                # 如果这行是签名关键词，也标记
+                if any(kw in stripped for kw in sig_keywords):
+                    tail_start = i
+                    break
+                # 短行（< 60字符）且不以句号结尾，可能是签名中的名字/职位/公司行
+                if len(stripped) < 60 and not stripped.endswith('.') and not stripped.endswith('?') and not stripped.endswith('!'):
+                    tail_start = i
+                else:
+                    break  # 遇到正常的正文行，停止
+            # 只在连续3行以上看起来像签名时才移除
+            sig_lines = [l for l in lines[tail_start:] if l.strip()]
+            if len(sig_lines) >= 2:
+                sig_start = tail_start
 
         # 找 greeting 的结束行（从开头向后搜索）
         greeting_end = 0
@@ -1234,7 +1409,7 @@ class EmailWorkflow:
                 if greeting_end > 0:
                     break  # greeting 后的空行表示 greeting 结束
                 continue
-            if greeting_end == 0 and stripped.startswith('Hi ') or stripped.startswith('Dear ') or stripped.startswith('Hello '):
+            if greeting_end == 0 and (stripped.startswith('Hi ') or stripped.startswith('Dear ') or stripped.startswith('Hello ')):
                 greeting_end = i + 1
             elif greeting_end > 0:
                 # greeting 后的第一个非空非签名行是正文开始
@@ -1248,23 +1423,51 @@ class EmailWorkflow:
         result = '\n'.join(body_lines).strip()
         # 清理开头和结尾的多余空行
         result = re.sub(r'\n{3,}', '\n\n', result)
+
+        # 清理正文开头可能出现的孤立短词（LLM 有时会生成 "Solar." 之类的垃圾开头）
+        # 如果正文开头是一个极短的词（<15字符）+ 句号，且后面跟着空行和正常段落，则移除它
+        while True:
+            first_line = result.split('\n')[0].strip() if result else ''
+            if len(first_line) < 20 and first_line.endswith('.') and len(result.split('\n')) > 2:
+                # 检查这是否是一个完整的句子（有主语和谓语）
+                words = first_line.split()
+                if len(words) <= 3:
+                    # 孤立短词，移除第一行及其后的空行
+                    parts = result.split('\n', 1)
+                    if len(parts) > 1:
+                        result = parts[1].lstrip('\n')
+                    else:
+                        break
+                else:
+                    break
+            else:
+                break
+
         return result
 
-    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None, selected_material_ids=None):
+    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None, selected_material_ids=None, skip_refine=False, skip_format=False):
         """使用 DeepSeek V4 Pro 生成邮件（LLM 增强模式）
 
         Args:
             customer_name: 客户公司名称
             website: 客户官网URL
             progress_callback: 进度回调函数，接收(step_id, status)参数
-            target_word_count: 目标字数范围 {'min': int, 'max': int}
+            target_word_count: 目标字数 - 支持两种格式：
+              - int: 目标字数（自动转范围：min=target-30, max=target+30）
+              - dict: {'min': int, 'max': int}（兼容旧前端）
             selected_material_ids: 用户手动选中的素材ID列表
         """
-        # 确保 target_word_count 是字典格式
+        # 统一格式：int → 范围自动计算（容差±10）；dict → 直接使用；None → 默认150
         if target_word_count is None:
-            target_word_count = {'min': 150, 'max': 250}
-        elif isinstance(target_word_count, int):
-            target_word_count = {'min': max(target_word_count - 30, 80), 'max': target_word_count + 30}
+            target_word_count = 150  # 默认目标字数 150
+        if isinstance(target_word_count, int):
+            target_word_count = {'min': max(10, target_word_count - 10), 'max': target_word_count + 10}
+        # 已经是 dict → 直接保留（兼容旧前端）
+
+        # 保存原始目标字数（int），用于最终字数校验
+        _original_target = target_word_count
+        if isinstance(_original_target, dict):
+            _original_target = (_original_target.get('min', 140) + _original_target.get('max', 160)) // 2
 
         has_website = bool(website and website.strip() and website.strip().startswith('http'))
 
@@ -1382,11 +1585,23 @@ class EmailWorkflow:
 
         # ===== 节点5: 素材匹配（LLM）=====
         print(f"\n[节点5] 素材匹配 (LLM)")
+        # 获取公司信息：先从发信人信息合并，再从 company_info.json 补充
         company_info = {}
+        # 优先从发信人信息中获取
+        sender_info = self.composer.sender_info if hasattr(self.composer, 'sender_info') else {}
+        if sender_info:
+            company_info['sender_name'] = sender_info.get('sender_name', '')
+            company_info['job_title'] = sender_info.get('job_title', '')
+            company_info['company_name'] = sender_info.get('company_name', '')
+            company_info['company_website'] = sender_info.get('company_website', '')
+        # 从 company_info.json 补充缺失字段
         company_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'company_info.json')
         if os.path.exists(company_path):
             with open(company_path, 'r', encoding='utf-8') as f:
-                company_info = json.load(f)
+                json_info = json.load(f)
+                for key, val in json_info.items():
+                    if not company_info.get(key):
+                        company_info[key] = val
         materials = self.llm.match_materials(classification, research_result, company_info)
         if materials:
             print(f"  ✓ LLM 素材匹配成功")
@@ -1399,21 +1614,64 @@ class EmailWorkflow:
             )
         _notify('material', 'completed')
 
+        # ===== 邮箱类型自动识别 =====
+        email_type = 'public'
+        contact_name_for_email = None
+        try:
+            from database.connection import get_connection
+            conn = get_connection()
+            cursor = conn.cursor()
+            # 通过customer_name关联customers表获取emails
+            cursor.execute(
+                'SELECT e.email_address, e.email_type, e.contact_name '
+                'FROM emails e JOIN customers c ON e.customer_id = c.id '
+                'WHERE c.customer_name = ? AND e.is_active = 1 '
+                'AND (c.user_id = ? OR ? = 1)',
+                (customer_name, self.user_id, 1 if self.is_admin else 0)
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            if rows:
+                # 优先选择个人邮箱（有contact_name的）
+                personal_row = None
+                public_row = None
+                for row in rows:
+                    addr, etype, cname = row
+                    if etype == 'personal' and cname and cname.strip():
+                        personal_row = (addr, etype, cname)
+                    elif etype == 'public' or not personal_row:
+                        public_row = (addr, etype, cname)
+                chosen = personal_row or public_row
+                if chosen:
+                    email_addr, email_type, contact_name_for_email = chosen
+                    # 如果数据库没有contact_name，用classify_email推断
+                    if not contact_name_for_email or not contact_name_for_email.strip():
+                        from utils.email_classifier import classify_email
+                        email_type, contact_name_for_email = classify_email(email_addr)
+                    print(f"  邮箱识别: {email_addr} → 类型={email_type}, 姓名={contact_name_for_email}")
+            else:
+                print(f"  未找到客户邮箱，默认使用公共邮箱类型")
+        except Exception as e:
+            print(f"  ⚠ 邮箱类型识别失败，默认公共邮箱: {e}")
+
         # ===== 节点6: 邮件生成（LLM）=====
         print(f"\n[节点6] 邮件生成 (LLM)")
         _notify('compose', 'running')
         llm_email = self.llm.compose_email(
             research_result, classification, fabe_points, materials,
+            contact_name=contact_name_for_email, email_type=email_type,
             has_website=has_website, company_info=company_info,
             target_word_count=target_word_count
         )
 
         if llm_email.get('error'):
             print(f"  ⚠ LLM 邮件生成失败: {llm_email['error']}，回退到规则引擎")
-            email = self.composer.compose(research_result, classification, fabe_points, materials, has_website=has_website, target_word_count=target_word_count)
+            email = self.composer.compose(research_result, classification, fabe_points, materials,
+                                          contact_name=contact_name_for_email, email_type=email_type,
+                                          has_website=has_website, target_word_count=target_word_count)
         else:
             print(f"  ✓ LLM 邮件生成成功")
-            greeting = self.composer._generate_greeting(None, customer_name, 'public')
+            greeting = self.composer._generate_greeting(contact_name_for_email, customer_name, email_type)
             signature = self.composer._generate_signature()
             # LLM 返回的 body 包含 greeting 和 signature，需要剥离，只保留纯正文
             llm_body = llm_email['body']
@@ -1428,21 +1686,39 @@ class EmailWorkflow:
         _notify('compose', 'completed')
 
         # ===== 节点7: 邮件润色（LLM）=====
-        print(f"\n[节点7] 邮件润色 (LLM)")
-        _notify('refine', 'running')
-        # 传入纯正文给润色（不含 greeting/signature）
-        refined = self.llm.refine_email(email['subject'], email['body'], target_word_count=target_word_count)
-        if not refined.get('error'):
-            email['subject'] = refined['subject']
-            # LLM 润色返回的 body 也可能包含 greeting/signature，需要剥离
-            refined_body = self._strip_greeting_and_signature(refined['body'], email['greeting'], email['signature'])
-            email['body'] = refined_body
-            email['full_text'] = f"{email['greeting']}\n\n{refined_body}\n\n{email['signature']}"
-            print(f"  ✓ LLM 润色完成")
+        if not skip_refine:
+            print(f"\n[节点7] 邮件润色 (LLM)")
+            _notify('refine', 'running')
+            # 传入纯正文给润色（不含 greeting/signature）
+            refined = self.llm.refine_email(email['subject'], email['body'], target_word_count=target_word_count, customer_name=customer_name)
+            if not refined.get('error'):
+                email['subject'] = refined['subject']
+                # LLM 润色返回的 body 也可能包含 greeting/signature，需要剥离
+                refined_body = self._strip_greeting_and_signature(refined['body'], email['greeting'], email['signature'])
+                email['body'] = refined_body
+                email['full_text'] = f"{email['greeting']}\n\n{refined_body}\n\n{email['signature']}"
+                print(f"  ✓ LLM 润色完成")
+            else:
+                print(f"  ⚠ LLM 润色失败，使用原始内容")
+                email = self.refiner.refine(email, target_word_count=target_word_count)
+            _notify('refine', 'completed')
         else:
-            print(f"  ⚠ LLM 润色失败，使用原始内容")
-            email = self.refiner.refine(email, target_word_count=target_word_count)
-        _notify('refine', 'completed')
+            print(f"\n[节点7] 邮件润色 — 跳过（调度器模式）")
+
+        # ===== 节点7.5: 邮件排版（LLM）=====
+        if not skip_format:
+            print(f"\n[节点7.5] 邮件排版 (LLM)")
+            _notify('format', 'running')
+            format_result = self.llm.format_email(email['body'], target_words=_original_target)
+            if not format_result.get('error'):
+                email['body'] = format_result['body']
+                email['full_text'] = f"{email['greeting']}\n\n{email['body']}\n\n{email['signature']}"
+                print(f"  ✓ LLM 排版完成: {format_result['word_count']} 词, {len(email['body'].split(chr(10)*2))} 段")
+            else:
+                print(f"  ⚠ LLM 排版失败，使用原始内容: {format_result.get('error')}")
+            _notify('format', 'completed')
+        else:
+            print(f"\n[节点7.5] 邮件排版 — 跳过（手动模式，用户可自行排版）")
 
         # ===== 节点8: HTML 渲染（LLM）=====
         print(f"\n[节点8] HTML 渲染 (LLM)")
@@ -1453,9 +1729,45 @@ class EmailWorkflow:
             print(f"  ⚠ LLM HTML 渲染失败，回退到规则引擎")
             html = self.renderer.render(email)
 
+        # 后处理：清理 LLM 可能编造的自我介绍（即使有 sender_name，如果公司名不匹配也清理）
+        sender_name = self.composer.sender_info.get('sender_name', '') if hasattr(self.composer, 'sender_info') else ''
+        sender_company = self.composer.sender_info.get('company_name', '') if hasattr(self.composer, 'sender_info') else ''
+        import re
+        common_names = r'(?:Travis|Tom|John|Mike|David|James|Alex|Chris|Daniel|Kevin|Ryan|Steve|Mark|Paul|Jason|Brian|Eric|Sarah|Emily|Lisa|Anna)'
+        titles = r'(?:Business Development Manager|Sales Manager|Account Manager|Sales Director|Regional Director|VP of Sales|Marketing Manager|Product Manager)'
+        # 匹配完整的自我介绍句子（"My name is [Name], [Title] at [Company]"），整体移除
+        intro_patterns = [
+            rf"My name is\s+{common_names}\s*,\s*and\s+I\s+am\s+(?:the\s+|a\s+)?{titles}\s+at\s+[^.]+[.!]\s*",
+            rf"(?:My name is|I'm|I am)\s+{common_names}\s*,\s*{titles}\s+at\s+[^.!]+[.!]\s*",
+            rf"I'm\s+{common_names}\s*,\s*{titles}\s+at\s+[^.]+[.!]\s*",
+        ]
+        for pattern in intro_patterns:
+            email['body'] = re.sub(pattern, "", email['body'], count=1)
+            email['full_text'] = re.sub(pattern, "", email['full_text'], count=1)
+
+        # 清理 LLM 可能编造的公司名（如果用户未配置公司名）
+        if not sender_company:
+            for fake_name in ['Niteo Solar', 'Niteo Energy', 'Niteo Power', 'Niteo Tech']:
+                email['body'] = email['body'].replace(fake_name, 'our company')
+                email['full_text'] = email['full_text'].replace(fake_name, 'our company')
+                email['subject'] = email['subject'].replace(fake_name, 'Solar Solutions')
+
         print(f"\n{'=' * 60}")
         print(f"LLM 邮件生成完成!")
         print(f"{'=' * 60}")
+
+        body_words = len(email['body'].split())
+        print(f"最终字数: {body_words} 词 (目标: {_original_target})")
+
+        # ==================== 强制字数校验和自动修正 ====================
+        min_wc = max(10, _original_target - 10)
+        max_wc = _original_target + 10
+        if body_words < min_wc or body_words > max_wc:
+            print(f"[字数修正] {body_words} 词超出范围 [{min_wc}, {max_wc}]，正在自动修正...")
+            email['body'] = _enforce_word_count(email['body'], _original_target, min_wc, max_wc)
+            email['full_text'] = email.get('greeting', '') + '\n\n' + email['body'] + '\n\n' + email.get('signature', '')
+            body_words = len(email['body'].split())
+            print(f"[字数修正] 修正后字数: {body_words} 词")
 
         return {
             'customer_name': customer_name,
@@ -1465,14 +1777,308 @@ class EmailWorkflow:
             'signature': email['signature'],
             'full_text': email['full_text'],
             'html': html,
-            'word_count': email.get('word_count', len(email['body'].split())),
+            'word_count': body_words,
             'classification': classification,
             'fabe_points': fabe_points
         }
 
+    def generate_follow_up_email(self, sequence_id, step_id, user_id=None):
+        """
+        生成跟进邮件内容（跳过背调/分类/优势/FABE，只做素材匹配→生成→排版）
+
+        参数:
+            sequence_id: 跟进序列 ID
+            step_id: 跟进步骤 ID
+            user_id: 当前用户 ID
+
+        返回:
+            dict: {subject, body, greeting, signature, full_text} 或 None（失败时）
+        """
+        from database.follow_up_models import get_sequence, get_step, update_step
+        from database.connection import get_connection
+        from generators.follow_up_prompts import build_follow_up_prompt
+
+        print(f"\n[跟进邮件] 开始生成 sequence_id={sequence_id}, step_id={step_id}")
+
+        # ===== 1. 读取序列和步骤信息 =====
+        admin = self.is_admin
+        sequence = get_sequence(sequence_id, user_id=user_id, admin=admin)
+        if not sequence:
+            print(f"  ✗ 序列不存在: sequence_id={sequence_id}")
+            update_step(step_id, user_id=user_id, admin=admin,
+                        error_message=f'序列不存在: sequence_id={sequence_id}')
+            return None
+
+        step = get_step(step_id, user_id=user_id, admin=admin)
+        if not step:
+            print(f"  ✗ 步骤不存在: step_id={step_id}")
+            update_step(step_id, user_id=user_id, admin=admin,
+                        error_message=f'步骤不存在: step_id={step_id}')
+            return None
+
+        # ===== 2. 从 generation_context 解析上下文 =====
+        gen_ctx = sequence.get('generation_context') or {}
+        first_email_info = gen_ctx.get('first_email', {})
+        classification = gen_ctx.get('customer_classification', {})
+        sender_info = gen_ctx.get('sender_info', {})
+        advantages = gen_ctx.get('advantages', [])
+        config_json = sequence.get('config_json') or {}
+
+        # 从序列关联的第一封邮件记录中读取邮件内容
+        first_email_subject = ''
+        first_email_body = ''
+        first_email_log_id = sequence.get('first_email_log_id')
+
+        if first_email_log_id:
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT email_subject, email_content FROM email_logs WHERE id = ?',
+                    (first_email_log_id,)
+                )
+                log_row = cursor.fetchone()
+                conn.close()
+                if log_row:
+                    first_email_subject = log_row[0] or ''
+                    first_email_body = log_row[1] or ''
+                    print(f"  ✓ 读取第一封邮件记录: {len(first_email_body)} 字符")
+            except Exception as e:
+                print(f"  ⚠ 读取第一封邮件记录失败: {e}")
+
+        # 如果 email_logs 没有数据，尝试从 generation_context 获取
+        if not first_email_body and first_email_info:
+            first_email_subject = first_email_info.get('subject', '')
+            first_email_body = first_email_info.get('body', '') or first_email_info.get('full_text', '')
+
+        # ===== 3. 解析客户分类和发信人信息 =====
+        power_type = classification.get('power_type', 'High Power')
+        track = classification.get('track', 'General')
+        pain_points = classification.get('pain_points', [])
+
+        # 从 generation_context 或发信人信息中提取
+        sender_name = sender_info.get('sender_name', config_json.get('sender_name', ''))
+        sender_company = sender_info.get('company_name', config_json.get('sender_company', ''))
+        sender_position = sender_info.get('job_title', config_json.get('sender_position', ''))
+
+        # 如果 generation_context 中没有发信人信息，尝试从 composer 获取
+        if not sender_name and hasattr(self.composer, 'sender_info'):
+            si = self.composer.sender_info or {}
+            sender_name = si.get('sender_name', '')
+            sender_company = si.get('company_name', '')
+            sender_position = si.get('job_title', '')
+
+        # 获取客户信息
+        customer_name = ''
+        customer_country = ''
+        customer_industry = ''
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT customer_name, country, industry_type FROM customers WHERE id = ?',
+                (sequence.get('customer_id'),)
+            )
+            c_row = cursor.fetchone()
+            conn.close()
+            if c_row:
+                customer_name = c_row[0] or ''
+                customer_country = c_row[1] or ''
+                customer_industry = c_row[2] or ''
+        except Exception as e:
+            print(f"  ⚠ 读取客户信息失败: {e}")
+
+        # 如果 generation_context 中有客户信息，优先使用
+        if not customer_name:
+            customer_name = gen_ctx.get('customer_name', '')
+        if not customer_industry:
+            customer_industry = classification.get('industry', '')
+        if not customer_country:
+            customer_country = classification.get('country', '')
+
+        # ===== 4. 根据步骤 purpose 加载素材 =====
+        case_material = None
+        brochure_material = None
+        purpose = step['purpose']
+
+        if purpose == 'case_study':
+            # 按 track 加载案例素材
+            try:
+                cases = get_cases_by_track(track, user_id=user_id, admin=admin)
+                if cases:
+                    # 取第一个最相关的案例
+                    case_material = cases[0]
+                    print(f"  ✓ 加载案例素材: {case_material.get('title', case_material.get('name', 'case'))}")
+            except Exception as e:
+                print(f"  ⚠ 加载案例素材失败: {e}")
+
+        elif purpose == 'resource':
+            # 按 power_type 加载宣传册素材
+            try:
+                brochure_material = get_brochure_by_power_type(power_type, user_id=user_id, admin=admin)
+                if brochure_material:
+                    print(f"  ✓ 加载宣传册素材: {list(brochure_material.keys())}")
+            except Exception as e:
+                print(f"  ⚠ 加载宣传册素材失败: {e}")
+
+        # ===== 5. 构建 context 字典 =====
+        # 根据策略确定目标字数
+        purpose_word_counts = {
+            'reminder': 80,
+            'case_study': 120,
+            'question': 80,
+            'resource': 100,
+            'loss_aversion': 100,
+            'breakup': 50,
+        }
+        word_count = config_json.get('word_count', purpose_word_counts.get(purpose, 100))
+
+        context = {
+            'first_email_subject': first_email_subject,
+            'first_email_body': first_email_body,
+            'customer_name': customer_name or 'Valued Partner',
+            'customer_country': customer_country,
+            'customer_industry': customer_industry,
+            'sender_name': sender_name,
+            'sender_company': sender_company,
+            'sender_position': sender_position,
+            'power_type': power_type,
+            'track': track,
+            'advantages': advantages,
+            'pain_points': pain_points,
+            'case_material': case_material,
+            'brochure_material': brochure_material,
+            'word_count': word_count,
+            'language': config_json.get('language', 'en'),
+        }
+
+        # ===== 6. 构建 Prompt 并调用 LLM =====
+        step_number = step['step_number']
+        total_steps = sequence.get('total_steps', step_number)
+
+        try:
+            system_prompt, user_prompt = build_follow_up_prompt(
+                purpose, step_number, total_steps, context
+            )
+        except Exception as e:
+            print(f"  ✗ 构建 Prompt 失败: {e}")
+            update_step(step_id, user_id=user_id, admin=admin,
+                        error_message=f'构建 Prompt 失败: {e}')
+            return None
+
+        print(f"  调用 LLM 生成跟进邮件 (purpose={purpose}, step={step_number}/{total_steps})")
+
+        # breakup 邮件字数极少，max_tokens 也相应调低
+        max_tokens = 300 if purpose == 'breakup' else 800
+
+        content, error = self.llm._call(
+            system_prompt, user_prompt,
+            max_tokens=max_tokens,
+            temperature=0.7,
+            label=f'follow_up:{customer_name}:step{step_number}'
+        )
+
+        if error or not content:
+            error_msg = error or 'LLM 返回空内容'
+            print(f"  ✗ LLM 调用失败: {error_msg}")
+            update_step(step_id, user_id=user_id, admin=admin,
+                        error_message=f'LLM 调用失败: {error_msg}')
+            return None
+
+        # ===== 7. 解析 JSON 结果 =====
+        try:
+            # 清理可能的 markdown 包裹
+            if '```json' in content:
+                content = content.split('```json')[1].split('```')[0]
+            elif '```' in content:
+                content = content.split('```')[1].split('```')[0]
+
+            result = json.loads(content.strip())
+            subject = result.get('subject', '')
+            body = result.get('body', '')
+            greeting = result.get('greeting', f'Hi {customer_name} Team,')
+            signature = result.get('signature', f'Best regards,\n{sender_name}')
+
+            if not body:
+                print(f"  ✗ LLM 返回的 body 为空")
+                update_step(step_id, user_id=user_id, admin=admin,
+                            error_message='LLM 返回的 body 为空')
+                return None
+
+            print(f"  ✓ LLM 生成成功: {len(body.split())} 词")
+        except json.JSONDecodeError as e:
+            error_msg = f'JSON 解析失败: {e}'
+            print(f"  ✗ {error_msg}")
+            print(f"  原始内容: {content[:500]}")
+            update_step(step_id, user_id=user_id, admin=admin,
+                        error_message=error_msg)
+            return None
+
+        # ===== 8. 处理 subject_mode: reply 模式 =====
+        if step.get('subject_mode') == 'reply' and first_email_subject:
+            subject = f"Re: {first_email_subject}"
+            print(f"  reply 模式: 标题 = Re: {first_email_subject}")
+
+        # ===== 9. 签名规范化 =====
+        # 如果 LLM 返回的签名使用了占位符，替换为真实信息
+        if sender_name:
+            signature = signature.replace('[Sender Name]', sender_name).replace('[Your Name]', sender_name)
+        if sender_position:
+            signature = signature.replace('[Sender Title]', sender_position).replace('[Your Title]', sender_position)
+        if sender_company:
+            signature = signature.replace('[Sender Company]', sender_company).replace('[Your Company]', sender_company)
+
+        # ===== 10. 排版 =====
+        try:
+            formatted_body = self._format_email_body(body)
+            # 排版安全校验：字数不能偏差太大
+            original_wc = len(body.split())
+            formatted_wc = len(formatted_body.split())
+            if original_wc > 10 and (formatted_wc < original_wc * 0.7 or formatted_wc > original_wc * 1.3):
+                print(f"  ⚠ 排版安全校验：字数从 {original_wc} 到 {formatted_wc}，回退到原文")
+            else:
+                body = formatted_body
+        except Exception as e:
+            print(f"  ⚠ 排版失败，使用原始内容: {e}")
+
+        # ===== 11. 字数校验 =====
+        final_word_count = len(body.split())
+        if purpose != 'breakup' and final_word_count > word_count * 1.5:
+            # 超出目标太多，裁剪
+            print(f"  ⚠ 字数 {final_word_count} 超出目标 {word_count} 的 1.5 倍，正在裁剪...")
+            body = self._compress_body_to_target(body, int(word_count * 1.2))
+            final_word_count = len(body.split())
+
+        # ===== 12. 组装完整邮件 =====
+        full_text = f"{greeting}\n\n{body}\n\n{signature}"
+
+        # ===== 13. 保存结果到 follow_up_steps =====
+        try:
+            update_step(step_id, user_id=user_id, admin=admin,
+                        subject=subject, body=body, greeting=greeting,
+                        signature=signature, word_count=final_word_count,
+                        status='pending')
+            print(f"  ✓ 步骤结果已保存到数据库")
+        except Exception as e:
+            print(f"  ⚠ 保存步骤结果失败: {e}")
+
+        print(f"\n[跟进邮件] 生成完成!")
+        print(f"  主题: {subject}")
+        print(f"  字数: {final_word_count} 词 (目标: {word_count})")
+
+        return {
+            'subject': subject,
+            'body': body,
+            'greeting': greeting,
+            'signature': signature,
+            'full_text': full_text,
+            'word_count': final_word_count,
+        }
+
     def generate_email(self, customer_name: str, website: str,
                         progress_callback=None, target_word_count=None,
-                        selected_material_ids: list = None) -> Dict:
+                        selected_material_ids: list = None,
+                        skip_refine=False, skip_format=False) -> Dict:
         """
         一键生成开发信
 
@@ -1488,107 +2094,8 @@ class EmailWorkflow:
         """
         has_website = bool(website and website.strip() and website.strip().startswith('http'))
 
-        # 判断是否使用 LLM 模式
-        if self._should_use_llm():
-            return self._generate_with_llm(customer_name, website, progress_callback, target_word_count, selected_material_ids)
-
-        print("=" * 60)
-        print("开发信生成工作流 v2.0")
-        print("=" * 60)
-        print(f"目标客户: {customer_name}")
-        print(f"网站: {website if has_website else '(无)'}")
-
-        # 模板模式进度回调
-        def _notify(step_id, status='running'):
-            if progress_callback:
-                try:
-                    progress_callback(step_id, status)
-                except Exception:
-                    pass
-
-        # 节点1: 公司背调（无网站时跳过网站抓取，仅做搜索）
-        _notify('research', 'running')
-        if has_website:
-            research_result = self.researcher.research(customer_name, website)
-        else:
-            # 无网站时，构建最小化的 research_result
-            print("\n[节点1] 客户无网站信息，跳过网站背调")
-            research_result = {
-                'module1_profile': {
-                    'company_name': customer_name,
-                    'main_business': '',
-                    'target_markets': [],
-                    'business_model': 'unknown',
-                    'core_products': [],
-                    'has_own_brand': False
-                },
-                'module2_products': {
-                    'has_solar_products': False,
-                    'solar_products': [],
-                    'power_range_estimate': 'unknown',
-                    'panel_type': 'unknown',
-                    'procurement_mode': 'unknown',
-                    'volume_estimate': 'unknown'
-                },
-                'module3_pain_points': [],
-                'module4_tags': {
-                    'power_tendency': 'unknown',
-                    'track': 'General',
-                    'case_match': 'none'
-                }
-            }
-        _notify('research', 'completed')
-
-        # 节点2: 判断客户类型
-        _notify('pain_points', 'running')
-        classification = self.classifier.classify(research_result)
-        _notify('pain_points', 'completed')
-
-        # 节点3-5: 优势提炼 / FABE转化 / 素材匹配（合并为 material 步骤）
-        _notify('material', 'running')
-        # 节点3: 优势点提炼
-        advantages = self.advantage_selector.select(classification, research_result)
-
-        # 节点4: FABE法则实践
-        fabe_points = self.fabe_transformer.transform(advantages, classification, research_result)
-
-        # 节点5: 素材库智能匹配
-        materials = self.material_matcher.match(
-            classification, research_result,
-            selected_material_ids=selected_material_ids,
-            user_id=self.user_id, admin=self.is_admin
-        )
-        _notify('material', 'completed')
-
-        # 节点6: 开发信生成（传入 has_website 控制措辞）
-        _notify('compose', 'running')
-        email = self.composer.compose(research_result, classification, fabe_points, materials, has_website=has_website)
-        _notify('compose', 'completed')
-
-        # 节点7: 邮件内容精修
-        _notify('refine', 'running')
-        email = self.refiner.refine(email)
-        _notify('refine', 'completed')
-
-        # 节点8: HTML格式渲染
-        html = self.renderer.render(email)
-
-        print("\n" + "=" * 60)
-        print("开发信生成完成!")
-        print("=" * 60)
-
-        return {
-            'customer_name': customer_name,
-            'subject': email['subject'],
-            'greeting': email['greeting'],
-            'body': email['body'],
-            'signature': email['signature'],
-            'full_text': email['full_text'],
-            'html': html,
-            'word_count': email.get('word_count', 0),
-            'classification': classification,
-            'fabe_points': fabe_points
-        }
+        # 所有模式都使用 LLM 生成（不再区分模板/LLM 模式）
+        return self._generate_with_llm(customer_name, website, progress_callback, target_word_count, selected_material_ids, skip_refine=skip_refine, skip_format=skip_format)
 
 
 if __name__ == '__main__':

@@ -42,49 +42,66 @@ def save_bounce_log(data: dict) -> int:
 
 
 def update_email_log_bounce(recipient_email: str, bounce_type: str,
-                           original_subject: str = None) -> int:
-    """根据退信邮箱匹配原始发送记录并更新 bounce_status，返回匹配的 log_id"""
+                           original_subject: str = None, user_id: int = None) -> int:
+    """根据退信邮箱匹配原始发送记录并更新 bounce_status，返回匹配的 log_id。
+    当提供 user_id 时，通过 emails->customers 链过滤，防止跨用户操作。"""
     conn = get_connection()
     cursor = conn.cursor()
     try:
         log_id = None
+
+        # 构建 user_id 过滤条件
+        user_join = ''
+        user_where = ''
+        user_params_extra = []
+        if user_id is not None:
+            user_join = ' JOIN customers c ON e.customer_id = c.id '
+            user_where = ' AND c.user_id = ? '
+            user_params_extra = [user_id]
+
         # 方法1：收件人 + 主题匹配
         if original_subject:
-            cursor.execute('''
+            cursor.execute(f'''
                 SELECT el.id, el.email_id, el.customer_id
                 FROM email_logs el
                 JOIN emails e ON el.email_id = e.id
+                {user_join}
                 WHERE e.email_address = ?
                   AND el.send_status = 'sent'
                   AND (el.bounce_status IS NULL OR el.bounce_status = '')
+                  {user_where}
                 ORDER BY el.sent_at DESC LIMIT 1
-            ''', (recipient_email,))
+            ''', (recipient_email,) + tuple(user_params_extra))
             row = cursor.fetchone()
             if row:
                 log_id, email_id, customer_id = row
             else:
-                cursor.execute('''
+                cursor.execute(f'''
                     SELECT el.id, el.email_id, el.customer_id
                     FROM email_logs el
                     JOIN emails e ON el.email_id = e.id
+                    {user_join}
                     WHERE e.email_address = ?
                       AND el.email_subject LIKE ?
                       AND el.send_status = 'sent'
                       AND (el.bounce_status IS NULL OR el.bounce_status = '')
+                      {user_where}
                     ORDER BY el.sent_at DESC LIMIT 1
-                ''', (recipient_email, f'%{original_subject}%'))
+                ''', (recipient_email, f'%{original_subject}%') + tuple(user_params_extra))
                 row = cursor.fetchone()
 
         if not log_id:
-            cursor.execute('''
+            cursor.execute(f'''
                 SELECT el.id, el.email_id, el.customer_id
                 FROM email_logs el
                 JOIN emails e ON el.email_id = e.id
+                {user_join}
                 WHERE e.email_address = ?
                   AND el.send_status = 'sent'
                   AND (el.bounce_status IS NULL OR el.bounce_status = '')
+                  {user_where}
                 ORDER BY el.sent_at DESC LIMIT 1
-            ''', (recipient_email,))
+            ''', (recipient_email,) + tuple(user_params_extra))
             row = cursor.fetchone()
 
         if row:

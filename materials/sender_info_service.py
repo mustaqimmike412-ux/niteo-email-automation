@@ -69,8 +69,10 @@ def get_sender_info(user_id: int = None, admin: bool = False) -> Dict:
     4. 硬编码默认值
     """
     material = get_sender_info_material(user_id=user_id, admin=admin)
-    if material and material.get('content_json'):
-        return _normalize_sender_content(material['content_json'])
+    if material:
+        content = material.get('content') or material.get('content_json') or {}
+        if content:
+            return _normalize_sender_content(content)
     return _load_sender_info_from_json()
 
 
@@ -96,7 +98,7 @@ def get_sender_info_list(user_id: int = None, admin: bool = False) -> List[Dict]
     materials = get_materials_by_type('sender_info', user_id=user_id, admin=admin)
     result = []
     for m in materials:
-        content = m.get('content_json', {})
+        content = m.get('content') or m.get('content_json') or {}
         result.append({
             'id': m.get('id'),
             'name': m.get('name') or content.get('sender_name', 'Unknown'),
@@ -130,10 +132,10 @@ def save_sender_info(data: Dict, user_id: int = None, material_id: int = None) -
     ts = str(int(time.time()))
     material_key = f"sender_info_{user_id or 'system'}_{ts}"
     if material_id:
-        existing = get_material_by_id(material_id, user_id=user_id, admin=True)
+        existing = get_material_by_id(material_id, user_id=user_id, admin=False)
         if existing:
             material_key = existing.get('material_key', material_key)
-    
+
     material_data = {
         'material_key': material_key,
         'name': f"{data.get('sender_name', 'Sender')}",
@@ -147,11 +149,11 @@ def save_sender_info(data: Dict, user_id: int = None, material_id: int = None) -
         'tags': 'sender,profile',
         'source': 'user' if user_id else 'system'
     }
-    
+
     if material_id:
-        existing = get_material_by_id(material_id, user_id=user_id, admin=True)
+        existing = get_material_by_id(material_id, user_id=user_id, admin=False)
         if existing:
-            update_material(material_id, material_data, user_id=user_id, admin=True)
+            update_material(material_id, material_data, user_id=user_id, admin=False)
             return material_id
-    
+
     return create_material(material_data, user_id=user_id)

@@ -4,7 +4,7 @@ from database.connection import get_connection
 
 
 def log_email_send(customer_id, email_id, task_id, source, subject, content,
-                   status, error_message=None, conn=None):
+                   status, error_message=None, conn=None, user_id=None):
     """
     统一写入 email_logs 表
     source 字段规范: 'manual' | 'scheduled' | 'batch' | 'cli'
@@ -18,11 +18,11 @@ def log_email_send(customer_id, email_id, task_id, source, subject, content,
         cursor.execute('''
             INSERT INTO email_logs
             (customer_id, email_id, task_id, source, email_subject, email_content,
-             send_status, error_message, sent_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+             send_status, error_message, sent_at, created_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
         ''', (customer_id, email_id, task_id, source, subject, content,
               status, error_message,
-              datetime.now().isoformat() if status == 'sent' else None))
+              datetime.now().isoformat() if status == 'sent' else None, user_id))
         conn.commit()
         log_id = cursor.lastrowid
     finally:

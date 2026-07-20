@@ -14,7 +14,8 @@ from openai import APITimeoutError, APIConnectionError, RateLimitError, Internal
 class LLMEmailClient:
     """DeepSeek 大模型邮件生成客户端"""
 
-    def __init__(self, api_key=None, base_url=None, model=None):
+    def __init__(self, api_key=None, base_url=None, model=None, user_id=None):
+        self.user_id = user_id
         # 优先从数据库读取配置
         db_config = self._load_db_config()
         # 回退到 JSON 文件
@@ -254,13 +255,14 @@ Generate FABE for each advantage."""
         Returns:
             dict: {'subject': str, 'body': str, 'error': str or None}
         """
-        # 默认字数范围
+        # 默认字数范围（容差±10）
         if target_word_count is None:
-            target_word_count = {'min': 150, 'max': 250}
-        elif isinstance(target_word_count, int):
-            target_word_count = {'min': max(target_word_count - 30, 80), 'max': target_word_count + 30}
-        min_words = target_word_count.get('min', 150)
-        max_words = target_word_count.get('max', 250)
+            target_word_count = 150
+        if isinstance(target_word_count, int):
+            target_word_count = {'min': max(10, target_word_count - 10), 'max': target_word_count + 10}
+        min_words = target_word_count.get('min', 140)
+        max_words = target_word_count.get('max', 160)
+        _exact_target = (min_words + max_words) // 2
         profile = research_result.get('module1_profile', {})
         customer_name = profile.get('company_name', 'Valued Partner')
         pain_points = research_result.get('module3_pain_points', [])
@@ -284,50 +286,124 @@ Generate FABE for each advantage."""
         cases = materials.get('cases', []) if materials else []
         case_summary = '\n'.join([f"- {c.get('title', c.get('name', 'Case'))}" for c in cases[:2]])
 
-        system_prompt = f"""You are a professional B2B sales representative for {company_info.get('company_name', 'our company')}, a solar energy company.
-Write a personalized cold email to a potential customer.
+        # 根据发信人信息是否完整，构建不同的 prompt
+        has_sender = bool(company_info.get('sender_name'))
+        has_company = bool(company_info.get('company_name'))
+        sender_name = company_info.get('sender_name', '')
+        job_title = company_info.get('job_title', '')
+        company_name = company_info.get('company_name', '')
+
+        if has_sender and has_company:
+            # 发信人信息完整 — 使用真实姓名/公司名
+            company_block = f"""Our company info:
+- Company Name: {company_name}
+- Products: {', '.join(company_info.get('main_products', [])) if company_info.get('main_products') else 'Solar panels, solar power systems, off-grid solutions'}
+- Years in business: {company_info.get('years_in_business') or '10+'}
+- Sender Name: {sender_name}
+- Sender Title: {job_title or 'Sales Representative'}
+- Key strengths:
+  * {company_info.get('strength1') or 'OEM/ODM capability'}
+  * {company_info.get('strength2') or 'Multi-region manufacturing'}
+  * {company_info.get('strength3') or 'International certifications'}
+  * {company_info.get('strength4') or 'R&D customization'}
+
+SENDER IDENTITY (use in EVERY email — this is FIXED, never change):
+- Your name: {sender_name}
+- Your company: {company_name}
+- Your title: {job_title or 'Sales Representative'}"""
+            signature_block = f"""Best regards,
+{sender_name}
+{job_title or 'Sales Representative'}
+{company_name}"""
+        else:
+            # 发信人/公司信息不完整，使用匿名版 prompt
+            company_block = """About our company:
+- We are a solar energy company providing solar panels, solar power systems, and off-grid solutions.
+- We offer OEM/ODM capability, multi-region manufacturing, international certifications, and R&D customization.
+- We have 10+ years of industry experience."""
+            signature_block = """Best regards,
+[Your Name]
+[Your Title]
+[Your Company]"""
+
+        system_prompt = f"""You are a professional B2B sales representative. Write a personalized cold email to a potential customer.
+
+YOUR SENDER IDENTITY (MANDATORY — use EXACTLY these details, NEVER invent or change):
+- Your name: {sender_name or 'Sales Representative'}
+- Your company: {company_name or 'our solar energy company'}
+- Your title: {job_title or 'Sales Representative'}
 
 STRICT FORMAT RULES:
-1. Greeting (choose ONE based on recipient type):
-   - Public email / no specific contact: "Hi [Company Name] Team,"
-   - Has contact person name: "Hi [First Name],"
-   - NEVER use "Dear", always use "Hi"
-2. Body: Free-form, professional business American English. No fixed paragraph template required.
-   - MUST NOT use generic openers like "How are you", "I hope this email finds you well", "Hope you're doing well"
-   - Be direct, concise, and specific to the recipient's business
-3. Closing & Signature (FIXED order, NEVER change):
-   - Closing line: "Best regards," (exactly this, nothing else)
-   - Then left-aligned, each on its own line, no extra symbols or decorations:
-     [Your Full Name]
-     [Your Job Title]
-     [Your Company Full Name]
+1. DO NOT write a greeting line (no "Hi xxx,"). The system will add the greeting automatically. Start your output directly with the self-introduction sentence.
+
+   Write ONE self-introduction sentence as the first line. Vary the phrasing each time — here are examples:
+   - "I'm {sender_name or '[Your Name]'} from {company_name or '[Company]'}." (if sender info available)
+   - "My name is {sender_name or '[Your Name]'}, reaching out from {company_name or '[Company]'}."
+   - "This is {sender_name or '[Your Name]'} from {company_name or '[Company]'}."
+   - "{company_name or '[Company]'} and I have been helping businesses like yours with..."
+   Pick ONE and never repeat the same opener across emails. Do NOT use placeholders — always use the real name.
+
+2. Body Structure — The email MUST contain ALL 4 sections below. NO section may be skipped, regardless of word count:
+
+   Section 1 — OPENING (1-2 sentences):
+   Show you understand THEIR business. Mention their company name AND at least one of their core products.
+   Vary your opener — do NOT always start with "I noticed". Use diverse phrasing such as:
+   - "Having followed [Company]'s expansion into..."
+   - "It's great to see how [Company] has been..."
+   - "With [Company]'s focus on..."
+   - "I came across [Company]'s work in..."
+   - "[Company]'s commitment to [specific area] caught my attention."
+   NEVER repeat the same opening pattern. Make each email feel unique.
+
+   Section 2 — PAIN POINT (1-3 sentences, scale with word budget):
+   State ONE specific pain point from the "Customer Pain Points" below.
+   Explain WHY this hurts their business. Use their product names and market terms.
+   Be specific and concrete — NOT vague.
+   If word budget allows (180+ words), you MAY add a second pain point in the same section.
+
+   Section 3 — SOLUTION & EVIDENCE (2-4 sentences, scale with word budget):
+   THIS SECTION IS MANDATORY. NEVER skip it. NEVER replace it with another pain point.
+   Present our solar solution using the FABE points below.
+   Explain HOW our product solves the pain point(s) above.
+   MUST include at least ONE specific number, statistic, or metric from the evidence.
+   If word budget is tight, keep this to 2 sentences but it MUST exist.
+
+   Section 4 — CLOSING / CALL TO ACTION (1-2 sentences):
+   A clear, specific next step. Vary your CTA phrasing:
+   - "Would you be open to a quick call next Tuesday?"
+   - "I'd love to share a few case studies — would that be helpful?"
+   - "Can I send over a sample spec sheet for your review?"
+   Pick ONE natural CTA — never use the exact same wording twice.
+
+3. Signature (FIXED, never change):
+   {signature_block}
+
+WORD BUDGET ALLOCATION (CRITICAL — follow these proportions):
+- Opening: ~15% of word count
+- Pain Point: ~25% of word count
+- Solution: ~40% of word count (LARGEST section — this is the core of the email)
+- Closing/CTA: ~10% of word count
+- Greeting+Intro: ~10%
+The Solution section MUST always be the longest or second-longest section. If you find yourself writing more pain points than solution, STOP and rebalance.
 
 CONTENT RULES:
-- Length: {min_words}-{max_words} words (STRICTLY follow this range)
-- Focus on how our solar solutions benefit THEIR specific business
+- Length: MUST be between {min_words} and {max_words} words (target: {_exact_target}). This is a HARD constraint. Count every word precisely. If under {min_words}, add more detail to the Solution section. If over {max_words}, trim the Opening or Pain Point section — NEVER cut the Solution.
+- The email MUST be structured as: Opening → Pain Point → Solution → CTA. This order is FIXED.
+- NEVER end the email with a pain point. The Solution section MUST come before the CTA.
+- Focus on how our solar solutions solve THEIR specific pain points
 - {"Do NOT mention visiting their website." if not has_website else "Reference their products/business naturally."}
 - Write in English
-- Use the FABE points as the core value proposition — weave Feature, Advantage, Benefit, and Evidence into the email
-- Address their specific pain points with concrete solutions
+- Use concrete, specific language — avoid vague buzzwords like "innovative", "leading", "cutting-edge", "state-of-the-art"
+- Every claim MUST be backed by a specific feature, number, or case study from the FABE points
 - Output format: First line must be "SUBJECT: <email subject line>", then a blank line, then the email body
-- MUST mention the customer company name and at least one of their core products in the email body
-- MUST end with a complete CTA (call-to-action) and do NOT truncate the email
+- MUST end with a CTA and do NOT truncate the email
+- DIVERSITY IS KEY: vary your sentence structure, vocabulary, and phrasing. No two emails should read the same way.
 
-Our company info:
-- Name: {company_info.get('company_name', 'Our Company')}
-- Products: {', '.join(company_info.get('main_products', ['Solar panels, solar power systems, off-grid solutions']))}
-- Years in business: {company_info.get('years_in_business', '10+')}
-- Sender: {company_info.get('sender_name', 'Travis')}
-- Sender title: {company_info.get('job_title', 'Business Development Manager')}
-- Key strengths:
-  * {company_info.get('strength1', 'OEM/ODM capability')}
-  * {company_info.get('strength2', 'Multi-region manufacturing')}
-  * {company_info.get('strength3', 'International certifications')}
-  * {company_info.get('strength4', 'R&D customization')}"""
+{company_block}"""
 
-        # 加载邮件规范
+        # 加载邮件规范（按用户ID隔离）
         from database.email_guidelines_models import get_active_guidelines_text
-        guidelines_text = get_active_guidelines_text()
+        guidelines_text = get_active_guidelines_text(user_id=self.user_id)
 
         system_prompt += f"""
 
@@ -365,8 +441,15 @@ Our FABE Selling Points:
 Relevant Cases:
 {case_summary if case_summary else 'Various solar projects worldwide'}
 
-Write the cold email now. Remember: mention {customer_name} and their products, end with a clear CTA.
-IMPORTANT: Follow the STRICT FORMAT RULES for greeting and signature exactly as specified."""
+INSTRUCTIONS:
+1. DO NOT write a greeting line (no "Hi xxx,"). Start directly with the self-introduction sentence. The system will add the greeting automatically.
+2. The email MUST contain ALL 4 sections: Opening → Pain Point → Solution → CTA. No section may be skipped.
+3. Use the FABE Selling Points to explain HOW our solution solves the pain point(s).
+4. Mention {customer_name} and at least one of their core products naturally in the email.
+5. The Solution section is the most important part — it MUST be present and substantial. NEVER end with just a pain point.
+6. If word count is low (under 150 words): write 1 pain point + 1 solution. If high (180+ words): you may add a second pain point.
+7. End with a clear, specific CTA.
+8. Follow the STRICT FORMAT RULES for greeting and signature exactly as specified."""
 
         content, error = self._call(system_prompt, user_prompt, max_tokens=1500, temperature=0.7, label=f'compose:{customer_name}')
         if error:
@@ -408,7 +491,7 @@ IMPORTANT: Follow the STRICT FORMAT RULES for greeting and signature exactly as 
 
     # ==================== 节点7: 邮件润色 ====================
 
-    def refine_email(self, subject, body, target_word_count=None):
+    def refine_email(self, subject, body, target_word_count=None, customer_name=None):
         """
         润色精修邮件内容。
 
@@ -416,30 +499,38 @@ IMPORTANT: Follow the STRICT FORMAT RULES for greeting and signature exactly as 
             subject: 邮件主题
             body: 邮件正文
             target_word_count: 目标字数范围 {'min': int, 'max': int}
+            customer_name: 客户公司名称（用于保持 greeting 一致性）
 
         Returns:
             dict: {'subject': str, 'body': str, 'error': str or None}
         """
         if target_word_count is None:
-            target_word_count = {'min': 150, 'max': 250}
-        elif isinstance(target_word_count, int):
-            target_word_count = {'min': max(target_word_count - 30, 80), 'max': target_word_count + 30}
-        min_words = target_word_count.get('min', 150)
-        max_words = target_word_count.get('max', 250)
+            target_word_count = 150
+        if isinstance(target_word_count, int):
+            target_word_count = {'min': max(10, target_word_count - 10), 'max': target_word_count + 10}
+        min_words = target_word_count.get('min', 140)
+        max_words = target_word_count.get('max', 160)
+        _exact_target = (min_words + max_words) // 2
 
-        system_prompt = f"""You are an expert B2B email editor. Refine the following cold email.
+        greeting_instruction = ''
+        if customer_name:
+            greeting_instruction = f'\n11. If the greeting uses the company name, it MUST be "Hi {customer_name} Team," — do NOT change it to "[First Name]" or any placeholder.'
+
+        system_prompt = f"""You are an expert B2B email editor. Refine the following cold email while preserving its structure and core message.
 
 Rules:
 1. Keep the professional business American English tone
-2. Remove any redundant phrases or filler words
-3. Ensure the email length is {min_words}-{max_words} words (STRICTLY follow this range)
-4. Keep the core message, FABE points, and CTA intact
-5. Improve sentence flow and clarity
-6. Output format: First line "SUBJECT: <refined subject>", blank line, then refined body
-7. Do NOT add new information that wasn't in the original
-8. MUST NOT introduce generic openers like "How are you", "Hope you're doing well", "I hope this email finds you well"
-9. MUST keep the greeting format: "Hi [First Name]," or "Hi [Company] Team," — do NOT change to "Dear"
-10. MUST keep the signature format: "Best regards," followed by name, title, company — do NOT change"""
+2. Remove redundant phrases or filler words, BUT keep all pain point analysis and specific claims intact
+3. Ensure the email length is between {min_words} and {max_words} words (target: {_exact_target}). This is a HARD constraint — if under {min_words}, expand relevant points; if over {max_words}, trim filler words.
+4. Preserve the structure: Greeting + Self-intro → Opening → Pain Point 1 → Pain Point 2 → Solution & Evidence → CTA → Signature
+5. Keep the core message, all pain points, FABE points, specific numbers, and CTA intact — do NOT remove or weaken them
+6. Improve sentence flow and clarity
+7. Output format: First line "SUBJECT: <refined subject>", blank line, then refined body
+8. Do NOT add new information that wasn't in the original
+9. MUST NOT introduce generic openers like "How are you", "Hope you're doing well", "I hope this email finds you well"
+10. MUST keep the greeting format: "Hi [First Name]," or "Hi [Company] Team," — do NOT change to "Dear"
+11. MUST keep the signature block EXACTLY as it appears in the original — do NOT replace real names with placeholders like [Your Name]
+12. MUST keep the self-introduction sentence (e.g., "I'm [Sender Name] from [Company].") right after the greeting — do NOT remove or change it{greeting_instruction}"""
 
         user_prompt = f"""SUBJECT: {subject}
 
@@ -638,6 +729,58 @@ Assemble the most relevant sales materials."""
         except json.JSONDecodeError:
             return None
 
+    # ==================== 节点7.5: 邮件排版（LLM）====================
+
+    def format_email(self, body: str, target_words: int = None) -> Dict:
+        """
+        使用 LLM 对邮件正文进行排版美化：仅调整段落结构和空行，不删改任何文字。
+
+        Args:
+            body: 邮件正文（纯文本）
+            target_words: 目标字数（用于校验，排版不应大幅改变字数）
+
+        Returns:
+            dict: {'body': str, 'word_count': int} 或 {'error': str}
+        """
+        original_word_count = len(body.split())
+
+        system_prompt = f"""You are a text formatting assistant. Your task is ONLY to add proper paragraph breaks to the given email text.
+
+ABSOLUTE RULES (VIOLATION = FAILURE):
+1. DO NOT delete, add, rewrite, or reorder ANY words
+2. DO NOT remove greetings (Hi, Hello, etc.), sign-offs (Best regards, etc.), or names
+3. DO NOT change any sentence or word
+4. Your ONLY action: insert blank lines between paragraphs to improve readability
+5. Keep each paragraph to 2-4 sentences
+6. Preserve the exact original text character-for-character, only adding \\n\\n between paragraphs
+
+Output ONLY the text with paragraph breaks added. Nothing else."""
+
+        user_prompt = f"Add paragraph breaks to this email text. DO NOT change any words:\n\n{body}"
+
+        content, error = self._call(system_prompt, user_prompt, max_tokens=1200, temperature=0.0, label='format_email')
+        if error or not content:
+            return {'error': error or '排版失败', 'body': body, 'word_count': original_word_count}
+
+        formatted = content.strip()
+
+        # 安全校验：排版后字数不能比原文少太多（允许标点符号微调）
+        formatted_words = len(formatted.split())
+        if original_word_count > 20 and formatted_words < original_word_count * 0.7:
+            # 排版导致内容丢失超过30%，回退到原文
+            print(f"  ⚠ 排版安全校验：字数从 {original_word_count} 降到 {formatted_words}，内容丢失过多，回退到原文")
+            return {'body': body, 'word_count': original_word_count}
+
+        # 如果排版后变长太多（LLM可能添加了内容），也回退
+        if formatted_words > original_word_count * 1.3:
+            print(f"  ⚠ 排版安全校验：字数从 {original_word_count} 涨到 {formatted_words}，可能添加了内容，回退到原文")
+            return {'body': body, 'word_count': original_word_count}
+
+        return {
+            'body': formatted,
+            'word_count': formatted_words
+        }
+
     # ==================== 节点8: HTML 渲染 ====================
 
     def render_html(self, email):
@@ -722,9 +865,9 @@ CONTENT RULES:
 - Write in English
 - Output format: First line is "SUBJECT: <subject>", then a blank line, then the body"""
 
-        # 加载邮件规范
+        # 加载邮件规范（按用户ID隔离）
         from database.email_guidelines_models import get_active_guidelines_text
-        guidelines_text = get_active_guidelines_text()
+        guidelines_text = get_active_guidelines_text(user_id=self.user_id)
 
         system_prompt += f"""
 

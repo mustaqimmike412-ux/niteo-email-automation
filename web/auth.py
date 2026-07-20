@@ -255,7 +255,9 @@ def api_admin_invite_codes():
     note = data.get('note', '')
     expires_days = data.get('expires_days', None)
     if expires_days is not None:
-        expires_days = max(1, int(expires_days))
+        expires_days = int(expires_days)
+        if expires_days <= 0:
+            expires_days = None  # 0 或负数表示永不过期
     
     from database.invite_code_models import generate_invite_codes
     codes = generate_invite_codes(

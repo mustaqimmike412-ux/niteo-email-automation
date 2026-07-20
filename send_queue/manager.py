@@ -8,7 +8,8 @@ from database.log_service import log_email_send
 class SendTaskItem:
     """单封邮件发送项"""
     def __init__(self, index=0, email_id=0, customer_id=0, email_address='',
-                 contact_name='', email_type='', subject='', greeting='', body=''):
+                 contact_name='', email_type='', subject='', greeting='', body='',
+                 user_id=None):
         self.index = index
         self.email_id = email_id
         self.customer_id = customer_id
@@ -18,6 +19,7 @@ class SendTaskItem:
         self.subject = subject
         self.greeting = greeting
         self.body = body
+        self.user_id = user_id
         self.status = 'pending'  # pending/sending/sent/failed/retrying/skipped/cancelled
         self.retry_count = 0
         self.max_retries = 2
@@ -126,6 +128,7 @@ class SendQueueManager:
                 subject=item_data.get('subject', ''),
                 greeting=item_data.get('greeting', ''),
                 body=item_data.get('body', ''),
+                user_id=item_data.get('user_id', None),
             )
             item.max_retries = send_config.get('max_retries', 2)
             task.items.append(item)
@@ -334,30 +337,34 @@ class SendQueueManager:
 
         # 兜底：发送前检查该公司是否已在冷却期内发送成功（排除手动解除的）
         try:
-            from database.connection import get_connection
-            conn = get_connection()
-            cursor = conn.cursor()
-            # 检查是否被手动解除冷却
-            cursor.execute('SELECT 1 FROM cooldown_override WHERE customer_id = ?', (item.customer_id,))
-            if cursor.fetchone():
-                conn.close()
-                # 被手动解除，跳过冷却期检查
-                pass
+            # 跟进邮件不受常规冷却期限制
+            if task.task_id and 'followup_' in str(task.task_id):
+                pass  # 跟进邮件跳过冷却期检查
             else:
-                cooldown_days = task.config.get('cooldown_days', 7)
-                cutoff = (datetime.now() - timedelta(days=cooldown_days)).isoformat()
-                # 同一批量任务内的发送记录不计入冷却期检查（任务完成后统一冷却）
-                cursor.execute(
-                    'SELECT 1 FROM email_logs WHERE customer_id = ? AND send_status = "sent" AND sent_at >= ? AND (task_id IS NULL OR task_id != ?)',
-                    (item.customer_id, cutoff, task.task_id)
-                )
+                from database.connection import get_connection
+                conn = get_connection()
+                cursor = conn.cursor()
+                # 检查是否被手动解除冷却
+                cursor.execute('SELECT 1 FROM cooldown_override WHERE customer_id = ? AND (user_id IS NULL OR user_id = ?)', (item.customer_id, item.user_id))
                 if cursor.fetchone():
-                    item.status = 'skipped'
-                    item.error_message = f'该公司在{cooldown_days}天内已发送过，已跳过'
-                    self._log(f"    [跳过] {item.email_address}: 公司级冷却期内已发送")
                     conn.close()
-                    return False
-                conn.close()
+                    # 被手动解除，跳过冷却期检查
+                    pass
+                else:
+                    cooldown_days = task.config.get('cooldown_days', 7)
+                    cutoff = (datetime.now() - timedelta(days=cooldown_days)).isoformat()
+                    # 同一批量任务内的发送记录不计入冷却期检查（任务完成后统一冷却）
+                    cursor.execute(
+                        'SELECT 1 FROM email_logs WHERE customer_id = ? AND send_status = "sent" AND sent_at >= ? AND (task_id IS NULL OR task_id != ?) AND (user_id IS NULL OR user_id = ?)',
+                        (item.customer_id, cutoff, task.task_id, item.user_id)
+                    )
+                    if cursor.fetchone():
+                        item.status = 'skipped'
+                        item.error_message = f'该公司在{cooldown_days}天内已发送过，已跳过'
+                        self._log(f"    [跳过] {item.email_address}: 公司级冷却期内已发送")
+                        conn.close()
+                        return False
+                    conn.close()
         except Exception as e:
             self._log(f"    [冷却期检查失败] {item.email_address}: {e}")
 
@@ -367,12 +374,22 @@ class SendQueueManager:
                 return False
 
             try:
-                if self._sender is None:
+                # 根据 user_id 动态创建 EmailSender（确保使用正确的 SMTP 配置）
+                sender_user_id = getattr(item, 'user_id', None)
+                if self._sender is None or (sender_user_id and getattr(self._sender, '_user_id', None) != sender_user_id):
                     from core.sender import EmailSender
-                    self._sender = EmailSender()
+                    self._sender = EmailSender(user_id=sender_user_id)
+                    self._sender._user_id = sender_user_id
 
-                # 邮件正文已包含称呼（由编排层组装），直接使用
-                body = item.body
+                # 组装完整邮件正文：称呼 + 正文
+                # 去除 LLM 可能残留的 greeting 行，统一用正确的 per-recipient greeting
+                body = item.body or ''
+                greeting = item.greeting or ''
+                if greeting and body:
+                    import re
+                    # 去除 body 开头可能残留的 "Hi xxx," / "Dear xxx," / "Hello xxx," 行
+                    body = re.sub(r'^(Hi|Dear|Hello)\s+[^,]{1,50},\s*\n*', '', body.lstrip()).strip()
+                    body = f"{greeting}\n\n{body}"
 
                 success, message = self._sender.send_email(
                     item.email_address,
@@ -435,6 +452,7 @@ class SendQueueManager:
                 content=item.body if item.body else '',
                 status='sent' if success else 'failed',
                 error_message=message if not success else None,
+                user_id=item.user_id,
             )
             self._log(f"  [发送队列] 发送日志已记录: log_id={log_id}, source={source}, status={'sent' if success else 'failed'}, email={item.email_address}")
         except Exception as e:
@@ -451,14 +469,15 @@ class SendQueueManager:
                     INSERT OR REPLACE INTO send_task_items
                     (task_id, email_id, customer_id, email_address, contact_name, email_type,
                      subject, greeting, item_status, retry_count, max_retries, error_message,
-                     scheduled_send_at, actual_send_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     scheduled_send_at, actual_send_at, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     task.task_id, item.email_id, item.customer_id, item.email_address,
                     item.contact_name, item.email_type, item.subject, item.greeting,
                     item.status, item.retry_count, item.max_retries, item.error_message,
                     item.scheduled_send_at.isoformat() if item.scheduled_send_at else None,
                     item.actual_send_at.isoformat() if item.actual_send_at else None,
+                    item.user_id,
                 ))
             conn.commit()
             conn.close()
