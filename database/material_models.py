@@ -51,17 +51,17 @@ def invalidate_cache():
     _cache_loaded = False
 
 
-def get_material(material_key: str, user_id: int = None, admin: bool = False) -> Optional[Dict]:
+def get_material(material_key: str, user_id: int = None) -> Optional[Dict]:
     """获取单个素材"""
     _load_cache()
     mat = _materials_cache.get(material_key)
-    if mat and not admin and user_id:
+    if mat and user_id:
         if mat.get('user_id') is not None and mat.get('user_id') != user_id:
             return None
     return mat
 
 
-def get_materials_by_type(material_type: str, user_id: int = None, admin: bool = False, **filters) -> List[Dict]:
+def get_materials_by_type(material_type: str, user_id: int = None, **filters) -> List[Dict]:
     """按类型和条件筛选素材（支持 user_id 隔离）"""
     _load_cache()
     results = []
@@ -69,7 +69,7 @@ def get_materials_by_type(material_type: str, user_id: int = None, admin: bool =
         if mat['material_type'] != material_type:
             continue
         # user_id 隔离：用户只能看到私有素材 + 系统公共素材(user_id IS NULL)
-        if not admin and user_id is not None:
+        if user_id is not None:
             mat_user_id = mat.get('user_id')
             if mat_user_id is not None and mat_user_id != user_id:
                 continue
@@ -83,10 +83,10 @@ def get_materials_by_type(material_type: str, user_id: int = None, admin: bool =
     return sorted(results, key=lambda x: x.get('priority', 0), reverse=True)
 
 
-def get_advantages_by_power_type_db(power_type: str, user_id=None, admin=False) -> List[Dict]:
+def get_advantages_by_power_type_db(power_type: str, user_id=None) -> List[Dict]:
     """根据功率类型获取优势列表（数据库版，支持 user_id 隔离）"""
     scope = 'small_power' if power_type == 'Low Power' else 'large_power'
-    materials = get_materials_by_type('advantage', user_id=user_id, admin=admin)
+    materials = get_materials_by_type('advantage', user_id=user_id)
     result = []
     for mat in materials:
         content = mat['content']
@@ -96,9 +96,9 @@ def get_advantages_by_power_type_db(power_type: str, user_id=None, admin=False) 
     return result[:4]
 
 
-def get_cases_by_track_db(track: str, user_id=None, admin=False) -> List[Dict]:
+def get_cases_by_track_db(track: str, user_id=None) -> List[Dict]:
     """根据赛道获取案例列表（数据库版，支持 user_id 隔离）"""
-    materials = get_materials_by_type('case_study', user_id=user_id, admin=admin)
+    materials = get_materials_by_type('case_study', user_id=user_id)
     result = []
     for mat in materials:
         if mat.get('track') and mat['track'].lower() in track.lower():
@@ -106,10 +106,10 @@ def get_cases_by_track_db(track: str, user_id=None, admin=False) -> List[Dict]:
     return result
 
 
-def get_brochure_by_power_type_db(power_type: str, user_id=None, admin=False) -> Dict:
+def get_brochure_by_power_type_db(power_type: str, user_id=None) -> Dict:
     """根据功率类型获取宣传册素材（数据库版，支持 user_id 隔离）"""
     scope = 'small_power' if power_type == 'Low Power' else 'large_power'
-    materials = get_materials_by_type('brochure', user_id=user_id, admin=admin)
+    materials = get_materials_by_type('brochure', user_id=user_id)
     result = {}
     for mat in materials:
         content = mat['content']
@@ -119,18 +119,18 @@ def get_brochure_by_power_type_db(power_type: str, user_id=None, admin=False) ->
     return result
 
 
-def get_storage_brochure_db(user_id=None, admin=False) -> Dict:
+def get_storage_brochure_db(user_id=None) -> Dict:
     """获取储能宣传册素材（数据库版，支持 user_id 隔离）"""
-    materials = get_materials_by_type('storage', user_id=user_id, admin=admin)
+    materials = get_materials_by_type('storage', user_id=user_id)
     result = {}
     for mat in materials:
         result[mat['material_key']] = mat['content']
     return result
 
 
-def get_case_workflow_rules_db(track: str, region: str = "", user_id=None, admin=False) -> Dict:
+def get_case_workflow_rules_db(track: str, region: str = "", user_id=None) -> Dict:
     """获取案例调用规则（数据库版，支持 user_id 隔离）"""
-    materials = get_materials_by_type('rule', user_id=user_id, admin=admin)
+    materials = get_materials_by_type('rule', user_id=user_id)
     track_rules = {}
     for mat in materials:
         if mat.get('track') == track:
@@ -155,13 +155,13 @@ def get_case_workflow_rules_db(track: str, region: str = "", user_id=None, admin
     return result
 
 
-def get_material_library_db(user_id: int = None, admin: bool = False) -> Dict:
+def get_material_library_db(user_id: int = None) -> Dict:
     """获取完整素材库（数据库版，支持 user_id 隔离）"""
     _load_cache()
     result = {}
     for key, mat in _materials_cache.items():
         # user_id 隔离：用户只能看到私有素材 + 系统公共素材(user_id IS NULL)
-        if not admin and user_id is not None:
+        if user_id is not None:
             mat_user_id = mat.get('user_id')
             if mat_user_id is not None and mat_user_id != user_id:
                 continue
@@ -169,13 +169,13 @@ def get_material_library_db(user_id: int = None, admin: bool = False) -> Dict:
     return result
 
 
-def get_sender_info_material(user_id: int = None, admin: bool = False) -> Optional[Dict]:
+def get_sender_info_material(user_id: int = None) -> Optional[Dict]:
     """获取发信人信息素材（按优先级：用户私有 > 系统公共）"""
-    materials = get_materials_by_type('sender_info', user_id=user_id, admin=admin)
+    materials = get_materials_by_type('sender_info', user_id=user_id)
     if not materials:
         return None
     # 优先返回用户私有的（user_id 匹配）
-    if user_id and not admin:
+    if user_id:
         personal = [m for m in materials if m.get('user_id') == user_id]
         if personal:
             return personal[0]
@@ -204,14 +204,14 @@ def log_material_usage(material_id: int, customer_id: int = None,
         print(f"  ⚠ 记录素材使用日志失败: {e}")
 
 
-def get_material_usage_logs(page=1, per_page=20, user_id=None, admin=False) -> Dict:
+def get_material_usage_logs(page=1, per_page=20, user_id=None) -> Dict:
     """获取素材使用日志列表（分页）"""
     conn = get_connection()
     cursor = conn.cursor()
 
     where_clauses = []
     params = []
-    if not admin and user_id:
+    if user_id:
         where_clauses.append("user_id = ?")
         params.append(user_id)
 
@@ -250,7 +250,7 @@ def get_material_usage_logs(page=1, per_page=20, user_id=None, admin=False) -> D
 
 def get_materials_list(material_type=None, category=None, scope=None, track=None,
                        region=None, search=None, tag=None, active_only=True,
-                       page=1, per_page=20, user_id=None, admin=False) -> Dict:
+                       page=1, per_page=20, user_id=None) -> Dict:
     """获取资料列表（支持筛选、分页、搜索、标签筛选）"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -283,7 +283,7 @@ def get_materials_list(material_type=None, category=None, scope=None, track=None
         where_clauses.append("(name LIKE ? OR content_summary LIKE ? OR tags LIKE ?)")
         like = f"%{search}%"
         params.extend([like, like, like])
-    if not admin and user_id:
+    if user_id:
         where_clauses.append("user_id = ?")
         params.append(user_id)
 
@@ -325,11 +325,11 @@ def get_materials_list(material_type=None, category=None, scope=None, track=None
     }
 
 
-def get_material_by_id(material_id: int, user_id: int = None, admin: bool = False) -> Optional[Dict]:
+def get_material_by_id(material_id: int, user_id: int = None) -> Optional[Dict]:
     """根据 ID 获取素材详情"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute("""
             SELECT id, material_key, name, material_type, category, scope, track,
                    region, content_json, content_summary, priority, is_active,
@@ -364,10 +364,39 @@ def get_material_by_id(material_id: int, user_id: int = None, admin: bool = Fals
     }
 
 
+def _normalize_content_json(content):
+    """将 content_json 标准化为字典，支持字符串（JSON）或字典输入"""
+    if content is None:
+        return {}
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, str):
+        if not content.strip():
+            return {}
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                return parsed
+            # 如果解析后是字符串（双重编码），再解析一次
+            if isinstance(parsed, str):
+                try:
+                    return json.loads(parsed)
+                except:
+                    return {'value': parsed}
+            return {'value': parsed}
+        except (json.JSONDecodeError, TypeError):
+            return {'raw': content}
+    return {}
+
+
 def create_material(data: Dict, user_id: int = None) -> int:
     """创建新素材"""
     conn = get_connection()
     cursor = conn.cursor()
+    
+    # 标准化 content_json
+    content_json = _normalize_content_json(data.get('content_json', {}))
+    
     cursor.execute("""
         INSERT INTO materials (material_key, name, material_type, category, scope, track,
                                region, content_json, content_summary, priority, is_active,
@@ -378,7 +407,7 @@ def create_material(data: Dict, user_id: int = None) -> int:
         data.get('material_type', ''), data.get('category', ''),
         data.get('scope', ''), data.get('track', ''),
         data.get('region', ''),
-        json.dumps(data.get('content_json', {}), ensure_ascii=False),
+        json.dumps(content_json, ensure_ascii=False),
         data.get('content_summary', ''),
         data.get('priority', 0), data.get('is_active', 1),
         data.get('tags', ''), data.get('source', 'manual'),
@@ -391,10 +420,26 @@ def create_material(data: Dict, user_id: int = None) -> int:
     return material_id
 
 
-def update_material(material_id: int, data: Dict, user_id: int = None, admin: bool = False) -> bool:
-    """更新素材"""
+def update_material(material_id: int, data: Dict, user_id: int = None) -> bool:
+    """更新素材
+    
+    Returns:
+        bool: 更新成功返回 True
+        
+    Raises:
+        ValueError: 资料不存在或无权限、material_key重复等
+    """
     conn = get_connection()
     cursor = conn.cursor()
+
+    # 先检查资料是否存在且有权限
+    if user_id:
+        cursor.execute("SELECT id FROM materials WHERE id = ? AND user_id = ?", (material_id, user_id))
+    else:
+        cursor.execute("SELECT id FROM materials WHERE id = ?", (material_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise ValueError("资料不存在或无权限编辑")
 
     fields = []
     params = []
@@ -403,32 +448,43 @@ def update_material(material_id: int, data: Dict, user_id: int = None, admin: bo
                 'tags']:
         if key in data:
             fields.append(f"{key} = ?")
-            params.append(data[key])
+            val = data[key]
+            # 处理 None 值，确保空字符串而非 None 写入 NOT NULL 字段
+            if key in ('material_key', 'name', 'material_type', 'tags') and val is None:
+                val = ''
+            params.append(val)
 
     if 'content_json' in data:
         fields.append("content_json = ?")
-        params.append(json.dumps(data['content_json'], ensure_ascii=False))
+        content = _normalize_content_json(data['content_json'])
+        params.append(json.dumps(content, ensure_ascii=False))
 
     if fields:
         fields.append("updated_at = datetime('now')")
-        if not admin and user_id:
-            params.extend([material_id, user_id])
-            cursor.execute(f"UPDATE materials SET {', '.join(fields)} WHERE id = ? AND user_id = ?", params)
-        else:
-            params.append(material_id)
-            cursor.execute(f"UPDATE materials SET {', '.join(fields)} WHERE id = ?", params)
-        conn.commit()
+        try:
+            if user_id:
+                params.extend([material_id, user_id])
+                cursor.execute(f"UPDATE materials SET {', '.join(fields)} WHERE id = ? AND user_id = ?", params)
+            else:
+                params.append(material_id)
+                cursor.execute(f"UPDATE materials SET {', '.join(fields)} WHERE id = ?", params)
+            conn.commit()
+        except sqlite3.IntegrityError as e:
+            conn.close()
+            if 'UNIQUE constraint failed' in str(e) and 'material_key' in str(e):
+                raise ValueError(f"标识键已存在，请使用其他标识键")
+            raise ValueError(f"保存失败: {e}")
 
     conn.close()
     invalidate_cache()
     return True
 
 
-def delete_material(material_id: int, user_id: int = None, admin: bool = False) -> bool:
+def delete_material(material_id: int, user_id: int = None) -> bool:
     """删除素材"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute("DELETE FROM materials WHERE id = ? AND user_id = ?", (material_id, user_id))
     else:
         cursor.execute("DELETE FROM materials WHERE id = ?", (material_id,))
@@ -438,11 +494,11 @@ def delete_material(material_id: int, user_id: int = None, admin: bool = False) 
     return True
 
 
-def get_material_types(user_id: int = None, admin: bool = False) -> List[str]:
+def get_material_types(user_id: int = None) -> List[str]:
     """获取所有素材类型"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute("SELECT DISTINCT material_type FROM materials WHERE user_id = ? ORDER BY material_type", (user_id,))
     else:
         cursor.execute("SELECT DISTINCT material_type FROM materials ORDER BY material_type")
@@ -451,11 +507,11 @@ def get_material_types(user_id: int = None, admin: bool = False) -> List[str]:
     return types
 
 
-def get_material_categories(user_id: int = None, admin: bool = False) -> List[str]:
+def get_material_categories(user_id: int = None) -> List[str]:
     """获取所有分类（按用户隔离）"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute("SELECT DISTINCT category FROM materials WHERE category IS NOT NULL AND user_id = ? ORDER BY category", (user_id,))
     else:
         cursor.execute("SELECT DISTINCT category FROM materials WHERE category IS NOT NULL ORDER BY category")
@@ -464,11 +520,11 @@ def get_material_categories(user_id: int = None, admin: bool = False) -> List[st
     return categories
 
 
-def get_material_tracks(user_id: int = None, admin: bool = False) -> List[str]:
+def get_material_tracks(user_id: int = None) -> List[str]:
     """获取所有赛道（按用户隔离）"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute("SELECT DISTINCT track FROM materials WHERE track IS NOT NULL AND user_id = ? ORDER BY track", (user_id,))
     else:
         cursor.execute("SELECT DISTINCT track FROM materials WHERE track IS NOT NULL ORDER BY track")
@@ -477,21 +533,21 @@ def get_material_tracks(user_id: int = None, admin: bool = False) -> List[str]:
     return tracks
 
 
-def get_material_stats(user_id: int = None, admin: bool = False) -> Dict:
+def get_material_stats(user_id: int = None) -> Dict:
     """获取素材库统计"""
     conn = get_connection()
     cursor = conn.cursor()
 
-    user_where = " WHERE user_id = ?" if (not admin and user_id) else ""
-    user_params = [user_id] if (not admin and user_id) else []
+    user_where = " WHERE user_id = ?" if user_id else ""
+    user_params = [user_id] if user_id else []
 
     cursor.execute(f"SELECT COUNT(*) FROM materials{user_where}", user_params)
     total = cursor.fetchone()[0]
 
-    cursor.execute(f"SELECT COUNT(*) FROM materials WHERE is_active = 1{' AND user_id = ?' if (not admin and user_id) else ''}", user_params)
+    cursor.execute(f"SELECT COUNT(*) FROM materials WHERE is_active = 1{' AND user_id = ?' if user_id else ''}", user_params)
     active = cursor.fetchone()[0]
 
-    cursor.execute(f"SELECT material_type, COUNT(*) FROM materials{' WHERE user_id = ?' if (not admin and user_id) else ''} GROUP BY material_type", user_params)
+    cursor.execute(f"SELECT material_type, COUNT(*) FROM materials{' WHERE user_id = ?' if user_id else ''} GROUP BY material_type", user_params)
     type_counts = {row[0]: row[1] for row in cursor.fetchall()}
 
     cursor.execute(f"SELECT COUNT(*) FROM material_usage_log{user_where}", user_params)
@@ -507,13 +563,13 @@ def get_material_stats(user_id: int = None, admin: bool = False) -> Dict:
     }
 
 
-def get_all_tags(user_id=None, admin=False) -> List[str]:
+def get_all_tags(user_id=None) -> List[str]:
     """获取所有不重复的标签列表"""
     conn = get_connection()
     cursor = conn.cursor()
 
-    user_where = " WHERE user_id = ?" if (not admin and user_id) else ""
-    user_params = [user_id] if (not admin and user_id) else []
+    user_where = " WHERE user_id = ?" if user_id else ""
+    user_params = [user_id] if user_id else []
 
     cursor.execute(f"SELECT tags FROM materials{user_where}", user_params)
     all_tags = set()
@@ -527,13 +583,13 @@ def get_all_tags(user_id=None, admin=False) -> List[str]:
     return sorted(list(all_tags))
 
 
-def update_material_tags(material_id: int, tags: List[str], user_id=None, admin=False):
+def update_material_tags(material_id: int, tags: List[str], user_id=None):
     """更新素材标签"""
     conn = get_connection()
     cursor = conn.cursor()
 
     # 权限检查
-    if not admin and user_id:
+    if user_id:
         cursor.execute("SELECT user_id FROM materials WHERE id = ?", (material_id,))
         row = cursor.fetchone()
         if not row or (row[0] != user_id and row[0] is not None):

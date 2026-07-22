@@ -68,7 +68,7 @@ def get_sender_info(user_id: int = None, admin: bool = False) -> Dict:
     3. config/company_info.json 配置文件
     4. 硬编码默认值
     """
-    material = get_sender_info_material(user_id=user_id, admin=admin)
+    material = get_sender_info_material(user_id=user_id)
     if material:
         content = material.get('content') or material.get('content_json') or {}
         if content:
@@ -81,7 +81,7 @@ def get_sender_info_by_id(material_id: int, user_id: int = None, admin: bool = F
     按 ID 获取特定发信人信息。
     """
     from database.material_models import get_material_by_id
-    material = get_material_by_id(material_id, user_id=user_id, admin=admin)
+    material = get_material_by_id(material_id, user_id=user_id)
     if material and material.get('content_json'):
         result = _normalize_sender_content(material['content_json'])
         result['material_id'] = material_id
@@ -95,7 +95,7 @@ def get_sender_info_list(user_id: int = None, admin: bool = False) -> List[Dict]
     返回每个模板的 id, name, content_json 摘要。
     """
     from database.material_models import get_materials_by_type
-    materials = get_materials_by_type('sender_info', user_id=user_id, admin=admin)
+    materials = get_materials_by_type('sender_info', user_id=user_id)
     result = []
     for m in materials:
         content = m.get('content') or m.get('content_json') or {}
@@ -132,7 +132,7 @@ def save_sender_info(data: Dict, user_id: int = None, material_id: int = None) -
     ts = str(int(time.time()))
     material_key = f"sender_info_{user_id or 'system'}_{ts}"
     if material_id:
-        existing = get_material_by_id(material_id, user_id=user_id, admin=False)
+        existing = get_material_by_id(material_id, user_id=user_id)
         if existing:
             material_key = existing.get('material_key', material_key)
 
@@ -151,9 +151,9 @@ def save_sender_info(data: Dict, user_id: int = None, material_id: int = None) -
     }
 
     if material_id:
-        existing = get_material_by_id(material_id, user_id=user_id, admin=False)
+        existing = get_material_by_id(material_id, user_id=user_id)
         if existing:
-            update_material(material_id, material_data, user_id=user_id, admin=False)
+            update_material(material_id, material_data, user_id=user_id)
             return material_id
 
     return create_material(material_data, user_id=user_id)
