@@ -4227,6 +4227,42 @@
                 rateCard.style.background = '';
             }
 
+            // 渲染 TOP 5 退信原因
+            const reasonsList = document.getElementById('bounce-reasons-list');
+            if (reasonsList) {
+                if (d.top_reasons && d.top_reasons.length > 0) {
+                    reasonsList.innerHTML = d.top_reasons.map((r, i) => `
+                        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:0.82rem">
+                            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+                                <span style="width:18px;height:18px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:var(--text-2)">${i + 1}</span>
+                                <span style="color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.code)}">${esc(r.code)}</span>
+                            </div>
+                            <span style="font-weight:700;color:var(--accent);margin-left:8px;white-space:nowrap">${r.count}</span>
+                        </div>
+                    `).join('');
+                } else {
+                    reasonsList.innerHTML = '<div style="padding:12px;color:var(--text-3);font-size:0.82rem;text-align:center">暂无数据</div>';
+                }
+            }
+
+            // 渲染 TOP 5 退信域名
+            const domainsList = document.getElementById('bounce-domains-list');
+            if (domainsList) {
+                if (d.top_domains && d.top_domains.length > 0) {
+                    domainsList.innerHTML = d.top_domains.map((r, i) => `
+                        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:0.82rem">
+                            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+                                <span style="width:18px;height:18px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:var(--text-2)">${i + 1}</span>
+                                <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.domain)}">${esc(r.domain)}</span>
+                            </div>
+                            <span style="font-weight:700;color:var(--accent);margin-left:8px;white-space:nowrap">${r.count}</span>
+                        </div>
+                    `).join('');
+                } else {
+                    domainsList.innerHTML = '<div style="padding:12px;color:var(--text-3);font-size:0.82rem;text-align:center">暂无数据</div>';
+                }
+            }
+
             if (d.total > 0) {
                 document.getElementById('bounce-detail-card').style.display = 'block';
                 loadBounceDetail();
@@ -5041,10 +5077,11 @@
                 const inCd = cd.in_cooldown;
                 const remain = cd.remaining_days || 0;
                 const cdTag = inCd ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;background:rgba(231,76,60,0.12);color:#e74c3c;border-radius:4px;font-size:0.68rem;font-weight:600">冷却中 ${remain}天</span>` : '';
+                const bounceTag = c.hard_bounce_count > 0 ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;background:rgba(232,93,74,0.12);color:#e74c3c;border-radius:4px;font-size:0.68rem;font-weight:600" title="${c.hard_bounce_count} 个硬退信邮箱">❌ ${c.hard_bounce_count}</span>` : '';
                 return `
                 <tr data-id="${c.id}" style="${inCd ? 'opacity:0.65' : ''}">
                     <td style="padding:14px 12px"><input type="checkbox" class="row-select" value="${c.id}" onchange="updateBatchDeleteButton()"></td>
-                    <td style="padding:14px 12px"><a href="javascript:void(0)" onclick="viewCustomer(${c.id})" style="color:var(--blue);text-decoration:none;font-weight:600">${esc(c.name)}</a>${cdTag}</td>
+                    <td style="padding:14px 12px"><a href="javascript:void(0)" onclick="viewCustomer(${c.id})" style="color:var(--blue);text-decoration:none;font-weight:600">${esc(c.name)}</a>${cdTag}${bounceTag}</td>
                     <td style="padding:14px 12px">${esc(c.country || '-')}</td>
                     <td style="padding:14px 12px"><span class="badge badge-info">📧 ${c.email_count}</span></td>
                     <td style="padding:14px 12px">${c.sent_count || 0}</td>
@@ -5965,6 +6002,34 @@
         if (data) { toast('邮箱已删除', 'ok'); loadCustomerDetail(customerId); }
     }
 
+    async function bulkDeleteBounceEmails(customerId, bounceType) {
+        const label = bounceType === 'hard' ? '硬退信' : '软退信';
+        if (!confirm(`确定要删除该客户所有${label}邮箱吗？`)) return;
+        const data = await api(`/api/customers/${customerId}/emails/bulk-delete`, {
+            method: 'POST',
+            body: JSON.stringify({ bounce_type: bounceType })
+        });
+        if (data && data.success) {
+            toast(`已删除 ${data.deleted} 个${label}邮箱`, 'ok');
+            loadCustomerDetail(customerId);
+            loadCustomers(custPage);
+        } else {
+            toast(data.error || '删除失败', 'err');
+        }
+    }
+
+    async function resetBounceStatus(customerId) {
+        if (!confirm('确定要重置该客户所有邮箱的退信状态吗？\n\n这将清除硬退信/软退信标记，并重新启用被禁用的邮箱。')) return;
+        const data = await api(`/api/customers/${customerId}/emails/reset-bounce`, { method: 'POST' });
+        if (data && data.success) {
+            toast(`已重置 ${data.reset} 个邮箱的退信状态`, 'ok');
+            loadCustomerDetail(customerId);
+            loadCustomers(custPage);
+        } else {
+            toast(data.error || '重置失败', 'err');
+        }
+    }
+
     // ==================== CUSTOMER DETAIL (TABS) ====================
     async function viewCustomer(id) {
         currentDetailCustomerId = id;
@@ -5991,18 +6056,33 @@
 
         // Emails tab
         const emailsContainer = document.getElementById('detail-emails-list');
+        const hardBounceEmails = data.emails.filter(e => e.bounce_status === 'hard');
+        const softBounceEmails = data.emails.filter(e => e.bounce_status === 'soft');
+        const actionBar = (hardBounceEmails.length > 0 || softBounceEmails.length > 0)
+            ? `<div style="display:flex;gap:8px;margin-bottom:12px;padding:8px 12px;background:var(--bg);border-radius:8px;align-items:center">
+                <span style="font-size:0.78rem;color:var(--text-3)">
+                    ${hardBounceEmails.length > 0 ? `<span style="color:var(--accent);font-weight:600">❌ ${hardBounceEmails.length}</span> 硬退信` : ''}
+                    ${softBounceEmails.length > 0 ? `<span style="color:var(--gold);font-weight:600;margin-left:8px">⚠ ${softBounceEmails.length}</span> 软退信` : ''}
+                </span>
+                <div style="flex:1"></div>
+                ${hardBounceEmails.length > 0 ? `<button class="btn btn-accent btn-sm" onclick="bulkDeleteBounceEmails(${c.id}, 'hard')">删除硬退信</button>` : ''}
+                ${softBounceEmails.length > 0 ? `<button class="btn btn-accent btn-sm" onclick="bulkDeleteBounceEmails(${c.id}, 'soft')" style="background:var(--gold)">删除软退信</button>` : ''}
+                ${hardBounceEmails.length > 0 || softBounceEmails.length > 0 ? `<button class="btn btn-ghost btn-sm" onclick="resetBounceStatus(${c.id})">重置退信状态</button>` : ''}
+            </div>`
+            : '';
+
         if (data.emails.length === 0) {
             emailsContainer.innerHTML = '<div class="empty"><div class="title">暂无邮箱</div></div>';
         } else {
-            emailsContainer.innerHTML = data.emails.map(e => {
+            emailsContainer.innerHTML = actionBar + data.emails.map(e => {
                 const hasName = e.contact_name && e.contact_name.trim() !== '';
                 const hasTitle = e.job_title && e.job_title.trim() !== '';
                 const isBounceHard = e.bounce_status === 'hard';
                 const isBounceSoft = e.bounce_status === 'soft';
                 const bounceHtml = isBounceHard
-                    ? `<span class="badge badge-err" title="${esc(e.bounce_reason || '该邮箱已退信')}">❌ 退信</span>`
+                    ? `<span class="badge badge-err" title="${esc(e.bounce_reason || '该邮箱已退信')}">❌ 退信</span><span style="color:var(--accent);font-size:0.72rem;margin-left:4px">${esc(e.bounce_reason || '')}</span>`
                     : isBounceSoft
-                    ? `<span class="badge badge-warn" title="${esc(e.bounce_reason || '软退信 ' + e.bounce_count + '次')}">⚠ 软退信${e.bounce_count}</span>`
+                    ? `<span class="badge badge-warn" title="${esc(e.bounce_reason || '软退信 ' + e.bounce_count + '次')}">⚠ 软退信${e.bounce_count}</span><span style="color:var(--gold);font-size:0.72rem;margin-left:4px">${esc(e.bounce_reason || '')}</span>`
                     : '';
                 return `
                 <div class="email-list-item" style="opacity:${isBounceHard ? '0.6' : '1'};background:${isBounceHard ? 'var(--surface-2)' : ''}">
@@ -6779,13 +6859,16 @@
         }
     });
 
-    // 发送步骤定义（与后端对应）
+    // 发送步骤定义（与后端 SEND_STEPS 对应）
     const SEND_STEPS = [
     {id: 'research', name: '公司背调'},
-    {id: 'pain_points', name: '痛点分析'},
+    {id: 'pain_points', name: '客户分析'},
+    {id: 'advantages', name: '优势提炼'},
+    {id: 'fabe', name: 'FABE话术'},
     {id: 'material', name: '素材匹配'},
     {id: 'compose', name: '邮件生成'},
     {id: 'refine', name: '邮件润色'},
+    {id: 'format', name: '邮件排版'},
     {id: 'send', name: 'SMTP发送'}
 ];
 

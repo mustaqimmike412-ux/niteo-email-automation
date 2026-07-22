@@ -156,7 +156,8 @@ class SmartSubjectManager:
                           email_body: str = None,
                           user_override: int = 0) -> List[str]:
         """
-        为客户生成指定数量的备选标题
+        为客户生成指定数量的备选标题。
+        优先基于邮件正文内容生成，内容不足时用模板补充。
 
         Args:
             customer_name: 客户名称
@@ -181,33 +182,40 @@ class SmartSubjectManager:
         today_seed = int(hashlib.md5(f"{clean_name}_{time.strftime('%Y%m%d')}".encode()).hexdigest()[:8], 16)
         random.seed(today_seed)
 
-        # 从模板池随机选择指定数量的模板（不重复）
-        selected_templates = random.sample(self.TEMPLATES,
-                                           min(subject_count, len(self.TEMPLATES)))
-
         subjects = []
-        for template in selected_templates:
-            subject = template.format(
-                customer=clean_name,
-                country=clean_country,
-                industry=clean_industry
-            )
-            subject = self._validate_and_clean(subject)
-            if subject and subject not in subjects:  # 去重
-                subjects.append(subject)
 
-        # 如果有邮件正文，基于内容生成额外标题（从正文提取关键信息）
+        # 第一步：优先基于邮件正文生成内容相关标题
         if email_body and len(email_body) > 20:
             content_subjects = self._generate_subjects_from_body(email_body, clean_name)
             for cs in content_subjects:
-                if len(subjects) < subject_count and cs not in subjects:
+                if cs and cs not in subjects:
                     subjects.append(cs)
+                if len(subjects) >= subject_count:
+                    break
 
-        # 如果生成的数量不够，补充通用标题
+        # 第二步：如果内容标题不够，用模板补充
+        if len(subjects) < subject_count:
+            templates_needed = min(subject_count - len(subjects), len(self.TEMPLATES))
+            selected_templates = random.sample(self.TEMPLATES, templates_needed)
+            for template in selected_templates:
+                subject = template.format(
+                    customer=clean_name,
+                    country=clean_country,
+                    industry=clean_industry
+                )
+                subject = self._validate_and_clean(subject)
+                if subject and subject not in subjects:
+                    subjects.append(subject)
+                if len(subjects) >= subject_count:
+                    break
+
+        # 第三步：如果还不够，补充通用标题
         while len(subjects) < subject_count:
             generic = self._generate_generic_subject(clean_name, clean_industry)
             if generic not in subjects:
                 subjects.append(generic)
+            if len(subjects) >= subject_count:
+                break
 
         # 重置随机种子
         random.seed()
@@ -394,33 +402,141 @@ class SmartSubjectManager:
         return random.choice(generics)
 
     def _generate_subjects_from_body(self, email_body: str, customer_name: str) -> List[str]:
-        """从邮件正文提取关键信息，生成基于内容的标题（最多3条）"""
-        sentences = re.split(r'(?<=[.!?])\s+', email_body)
+        """
+        从邮件正文提取核心卖点，生成基于内容的多样化标题。
+        标题完全基于邮件实际内容，而非固定模板。
+        """
+        import re
         subjects = []
+        clean_name = self._clean_customer_name(customer_name)
 
-        # 提取包含关键信息的句子
-        keywords = ['solar', 'panel', 'efficiency', 'power', 'energy', 'battery',
-                     'storage', 'BC cell', 'black', 'tempered glass', 'DDP',
-                     'warranty', 'cost', 'savings', 'partner', 'integrate',
-                     'solution', 'performance', 'capacity', 'output']
+        # 提取正文的核心主题（段落级）
+        paragraphs = [p.strip() for p in email_body.split('\n\n') if len(p.strip()) > 30]
+        if not paragraphs:
+            paragraphs = [email_body]
 
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if len(sentence) < 20 or len(sentence) > 120:
-                continue
-            # 检查是否包含关键词
-            words = sentence.lower().split()
-            if any(kw in words for kw in keywords):
-                # 取前8-12个单词作为标题
-                title_words = words[:min(10, len(words))]
-                title = ' '.join(w.capitalize() if i == 0 else w for i, w in enumerate(title_words))
+        # 提取关键短语和卖点
+        themes = self._extract_themes(email_body)
+
+        # 基于主题生成多种句式的标题
+        for theme in themes[:5]:  # 最多5个主题
+            # 为每个主题生成2-3种不同句式的变体
+            variations = self._create_subject_variations(theme, clean_name)
+            for v in variations:
+                if v and v not in subjects and len(subjects) < 15:
+                    subjects.append(v)
+
+        # 如果基于内容生成的太少，从正文中提取关键句作为补充
+        if len(subjects) < 3:
+            sentences = re.split(r'(?<=[.!?])\s+', email_body)
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if len(sentence) < 25 or len(sentence) > 100:
+                    continue
+                # 跳过问候语和结尾
+                lower = sentence.lower()
+                if any(x in lower for x in ['hi ', 'hello ', 'dear ', 'best regards', 'sincerely', 'thank you']):
+                    continue
+                title = sentence[0].upper() + sentence[1:]
                 title = self._validate_and_clean(title)
-                if title and title not in subjects:
+                if title and title not in subjects and len(subjects) < 15:
                     subjects.append(title)
-                if len(subjects) >= 3:
-                    break
 
         return subjects
+
+    def _extract_themes(self, email_body: str) -> List[str]:
+        """从邮件正文提取核心主题/卖点短语"""
+        themes = []
+        body_lower = email_body.lower()
+
+        # 产品特性主题
+        product_patterns = [
+            (r'\b(\d+[%％]?)\s*(?:more efficient|higher efficiency|efficiency)',
+             lambda m: f"{m.group(1)} Higher Efficiency"),
+            (r'\b(\d+[%％]?)\s*(?:more power|power output)',
+             lambda m: f"{m.group(1)} More Power Output"),
+            (r'\b(pure black|all black|black surface)\b',
+             lambda m: "Pure Black Design"),
+            (r'\b(back[- ]?contact|bc cell|bc technology)\b',
+             lambda m: "Back-Contact Cell Technology"),
+            (r'\b(tempered glass|hardened glass)\b',
+             lambda m: "Tempered Glass Construction"),
+            (r'\b(ddp|delivered duty paid|door[- ]?to[- ]?door)\b',
+             lambda m: "DDP Delivery Service"),
+            (r'\b(\d+[+-]?\s*years?)\s*(?:warranty|guarantee)',
+             lambda m: f"{m.group(1)} Warranty"),
+            (r'\b(oem|odm|custom)\b',
+             lambda m: "OEM/ODM Customization"),
+        ]
+
+        for pattern, formatter in product_patterns:
+            match = re.search(pattern, body_lower)
+            if match:
+                theme = formatter(match)
+                if theme and theme not in themes:
+                    themes.append(theme)
+
+        # 价值主张主题
+        value_patterns = [
+            (r'\b(cost|save|saving|reduce cost)\b', "Cost Reduction Solutions"),
+            (r'\b(quality|reliable|durable|robust)\b', "Quality & Reliability"),
+            (r'\b(30%|50%|70%|\d+%)\s*(?:cost|save|reduce)',
+             lambda m: f"{m.group(1)} Cost Savings"),
+            (r'\b(carbon|sustainable|green|eco[- ]?friendly)\b',
+             "Sustainability Focus"),
+            (r'\b(global|worldwide|international|multi[- ]?country)\b',
+             "Global Supply Chain"),
+            (r'\b(sample|test|trial|free sample)\b',
+             "Free Sample Available"),
+        ]
+
+        for pattern, theme in value_patterns:
+            if isinstance(theme, str):
+                if re.search(pattern, body_lower) and theme not in themes:
+                    themes.append(theme)
+            else:
+                match = re.search(pattern, body_lower)
+                if match:
+                    t = theme(match)
+                    if t and t not in themes:
+                        themes.append(t)
+
+        # 行动号召主题
+        if re.search(r'\b(call|schedule|meeting|discuss|talk)\b', body_lower):
+            themes.append("Schedule a Discussion")
+        if re.search(r'\b(quote|pricing|price|proposal)\b', body_lower):
+            themes.append("Request a Quote")
+
+        return themes
+
+    def _create_subject_variations(self, theme: str, customer_name: str) -> List[str]:
+        """为一个主题创建多种句式的标题变体"""
+        variations = []
+
+        # 句式1: 直接陈述
+        variations.append(f"{theme} for {customer_name}")
+
+        # 句式2: 提问式
+        variations.append(f"Could {theme} Work for {customer_name}?")
+
+        # 句式3: 利益导向
+        variations.append(f"How {customer_name} Benefits from {theme}")
+
+        # 句式4: 简短有力
+        if len(theme) < 40:
+            variations.append(theme)
+
+        # 句式5: 合作视角
+        variations.append(f"{theme}: A Partnership with {customer_name}")
+
+        # 去重和清理
+        result = []
+        for v in variations:
+            v = self._validate_and_clean(v)
+            if v and v not in result:
+                result.append(v)
+
+        return result[:3]  # 每个主题最多3个变体
 
     def get_pool_stats(self, customer_id: int) -> Optional[Dict]:
         """获取标题池统计信息"""
