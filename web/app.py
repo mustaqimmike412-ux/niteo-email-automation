@@ -1698,11 +1698,10 @@ def api_subjects():
 
 @app.route('/api/scheduler/status')
 def api_scheduler_status():
-    """获取调度器状态"""
-    if not is_admin():
-        return jsonify({'success': False, 'error': '仅管理员可操作'}), 403
+    """获取调度器状态（所有用户可查看自己的数据）"""
     try:
-        status = scheduler_instance.get_status()
+        current_user_id = get_current_user_id()
+        status = scheduler_instance.get_status(user_id=current_user_id)
         return jsonify({'success': True, 'data': status})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

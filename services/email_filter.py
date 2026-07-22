@@ -13,7 +13,7 @@ class EmailFilter:
     def __init__(self, config=None):
         self.config = config or {}
 
-    def filter_customers(self, config=None, user_id=None, admin=False):
+    def filter_customers(self, config=None, user_id=None):
         """
         根据筛选规则获取待发送的客户及其邮箱列表
 
@@ -30,7 +30,6 @@ class EmailFilter:
                 - limit: int - 返回结果上限，默认200
                 - order_by: str - 排序方式: 'default'/'unsent_first'/'recent_sent'
             user_id: 当前用户 ID（数据隔离）
-            admin: 是否为管理员
 
         Returns:
             list[dict]: 待发送的邮件列表
@@ -56,7 +55,7 @@ class EmailFilter:
 
         # 检查今日已发送数量（按用户隔离）
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
-        if not admin and user_id:
+        if user_id:
             cursor.execute('SELECT COUNT(*) FROM email_logs WHERE sent_at >= ? AND user_id = ?', (today_start, user_id))
         else:
             cursor.execute('SELECT COUNT(*) FROM email_logs WHERE sent_at >= ?', (today_start,))
@@ -76,7 +75,7 @@ class EmailFilter:
         params = []
 
         # 数据隔离：只查询当前用户的客户和邮箱
-        if not admin and user_id:
+        if user_id:
             conditions.append('c.user_id = ?')
             params.append(user_id)
             conditions.append('e.user_id = ?')
@@ -87,7 +86,7 @@ class EmailFilter:
         if send_status not in ('sent', 'failed'):
             # 冷却期逻辑：如果在 cooldown_override 中则跳过冷却检查；否则排除冷却期内已发送的公司
             # 按用户隔离：只考虑当前用户的冷却期记录
-            if not admin and user_id:
+            if user_id:
                 conditions.append('''(
                     c.id IN (SELECT customer_id FROM cooldown_override WHERE user_id = ?)
                     OR c.id NOT IN (SELECT DISTINCT customer_id FROM email_logs WHERE sent_at >= ? AND user_id = ?)
@@ -206,11 +205,11 @@ class EmailFilter:
 
         return results
 
-    def get_customer_emails(self, customer_id, user_id=None, admin=False):
+    def get_customer_emails(self, customer_id, user_id=None):
         """获取指定客户的所有邮箱"""
         conn = get_connection()
         cursor = conn.cursor()
-        if not admin and user_id:
+        if user_id:
             cursor.execute('''
                 SELECT e.id, e.email_address, e.email_type, e.contact_name, e.job_title, e.is_active,
                        (SELECT COUNT(*) FROM email_logs el WHERE el.email_id = e.id AND el.send_status = 'sent') as sent_count,

@@ -57,11 +57,11 @@ def update_search_task(task_id: str, user_id: int = None, **kwargs) -> bool:
     return cursor.rowcount > 0
 
 
-def get_search_task(task_id: str, user_id: int = None, admin: bool = False) -> Optional[dict]:
+def get_search_task(task_id: str, user_id: int = None) -> Optional[dict]:
     """获取单个任务详情"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute('SELECT * FROM search_tasks WHERE task_id = ? AND (user_id = ? OR user_id IS NULL)', (task_id, user_id))
     else:
         cursor.execute('SELECT * FROM search_tasks WHERE task_id = ?', (task_id,))
@@ -72,7 +72,7 @@ def get_search_task(task_id: str, user_id: int = None, admin: bool = False) -> O
     return _task_row_to_dict(row)
 
 
-def get_search_tasks(status: str = None, page: int = 1, per_page: int = 20, user_id: int = None, admin: bool = False) -> dict:
+def get_search_tasks(status: str = None, page: int = 1, per_page: int = 20, user_id: int = None) -> dict:
     """获取任务列表（分页）"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -82,7 +82,7 @@ def get_search_tasks(status: str = None, page: int = 1, per_page: int = 20, user
     if status:
         conditions.append('status = ?')
         params.append(status)
-    if not admin and user_id:
+    if user_id:
         conditions.append('(user_id = ? OR user_id IS NULL)')
         params.append(user_id)
 
@@ -110,11 +110,11 @@ def get_search_tasks(status: str = None, page: int = 1, per_page: int = 20, user
     }
 
 
-def delete_search_task(task_id: str, user_id: int = None, admin: bool = False) -> bool:
+def delete_search_task(task_id: str, user_id: int = None) -> bool:
     """删除任务（级联删除结果由外键处理）"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute('DELETE FROM search_tasks WHERE task_id = ? AND user_id = ?', (task_id, user_id))
     else:
         cursor.execute('DELETE FROM search_tasks WHERE task_id = ?', (task_id,))
@@ -214,7 +214,7 @@ def save_search_results_batch(results: list, conn=None) -> int:
 
 def get_search_results(task_id: str = None, status: str = None, platform: str = None,
                        search_keyword: str = None, page: int = 1, per_page: int = 20,
-                       user_id: int = None, admin: bool = False) -> dict:
+                       user_id: int = None) -> dict:
     """获取搜索结果列表（分页+筛选）"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -233,7 +233,7 @@ def get_search_results(task_id: str = None, status: str = None, platform: str = 
     if search_keyword:
         conditions.append('company_name LIKE ?')
         params.append(f'%{search_keyword}%')
-    if not admin and user_id:
+    if user_id:
         conditions.append('(user_id = ? OR user_id IS NULL)')
         params.append(user_id)
 
@@ -261,11 +261,11 @@ def get_search_results(task_id: str = None, status: str = None, platform: str = 
     }
 
 
-def get_search_result(result_id: int, user_id: int = None, admin: bool = False) -> Optional[dict]:
+def get_search_result(result_id: int, user_id: int = None) -> Optional[dict]:
     """获取单条结果详情"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute('SELECT * FROM search_results WHERE id = ? AND (user_id = ? OR user_id IS NULL)', (result_id, user_id))
     else:
         cursor.execute('SELECT * FROM search_results WHERE id = ?', (result_id,))
@@ -276,12 +276,12 @@ def get_search_result(result_id: int, user_id: int = None, admin: bool = False) 
     return _result_row_to_dict(row)
 
 
-def update_result_import_status(result_id: int, status: str, customer_id: int = None, user_id: int = None, admin: bool = False) -> bool:
+def update_result_import_status(result_id: int, status: str, customer_id: int = None, user_id: int = None) -> bool:
     """更新结果导入状态"""
     conn = get_connection()
     cursor = conn.cursor()
-    user_where = ' AND (user_id = ? OR user_id IS NULL)' if (not admin and user_id) else ''
-    user_params = [user_id] if (not admin and user_id) else []
+    user_where = ' AND (user_id = ? OR user_id IS NULL)' if user_id else ''
+    user_params = [user_id] if user_id else []
     if customer_id is not None:
         cursor.execute(f'''
             UPDATE search_results
@@ -330,14 +330,14 @@ def update_result_emails(result_id: int, emails_json: list = None, email: str = 
     return cursor.rowcount > 0
 
 
-def bulk_update_result_status(result_ids: List[int], status: str, user_id: int = None, admin: bool = False) -> int:
+def bulk_update_result_status(result_ids: List[int], status: str, user_id: int = None) -> int:
     """批量更新结果状态，返回更新数量"""
     if not result_ids:
         return 0
     conn = get_connection()
     cursor = conn.cursor()
     placeholders = ','.join('?' * len(result_ids))
-    if not admin and user_id:
+    if user_id:
         cursor.execute(f'''
             UPDATE search_results
             SET import_status = ?, updated_at = CURRENT_TIMESTAMP
@@ -357,11 +357,11 @@ def bulk_update_result_status(result_ids: List[int], status: str, user_id: int =
 
 # ==================== Platform Configs ====================
 
-def get_platform_configs(user_id: int = None, admin: bool = False) -> List[dict]:
+def get_platform_configs(user_id: int = None) -> List[dict]:
     """获取所有平台配置（按用户隔离）"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute('SELECT * FROM search_platform_configs WHERE user_id = ? ORDER BY platform', (user_id,))
     else:
         cursor.execute('SELECT * FROM search_platform_configs ORDER BY platform')
@@ -370,11 +370,11 @@ def get_platform_configs(user_id: int = None, admin: bool = False) -> List[dict]
     return [_platform_row_to_dict(r) for r in rows]
 
 
-def get_platform_config(platform: str, user_id: int = None, admin: bool = False) -> Optional[dict]:
+def get_platform_config(platform: str, user_id: int = None) -> Optional[dict]:
     """获取单个平台配置（按用户隔离）"""
     conn = get_connection()
     cursor = conn.cursor()
-    if not admin and user_id:
+    if user_id:
         cursor.execute('SELECT * FROM search_platform_configs WHERE platform = ? AND user_id = ?', (platform, user_id))
     else:
         cursor.execute('SELECT * FROM search_platform_configs WHERE platform = ?', (platform,))
@@ -385,8 +385,8 @@ def get_platform_config(platform: str, user_id: int = None, admin: bool = False)
     return _platform_row_to_dict(row)
 
 
-def update_platform_config(platform: str, user_id: int = None, admin: bool = False, **kwargs) -> bool:
-    """更新平台配置（按用户隔离，仅admin可操作全局配置）"""
+def update_platform_config(platform: str, user_id: int = None, **kwargs) -> bool:
+    """更新平台配置（按用户隔离）"""
     allowed = {'is_enabled', 'api_key', 'api_secret', 'base_url', 'config_json',
                'rate_limit_per_minute', 'daily_quota'}
     updates = {k: v for k, v in kwargs.items() if k in allowed}
@@ -396,7 +396,7 @@ def update_platform_config(platform: str, user_id: int = None, admin: bool = Fal
     conn = get_connection()
     cursor = conn.cursor()
 
-    if not admin and user_id:
+    if user_id:
         # 普通用户只能修改自己的配置
         cursor.execute('SELECT id FROM search_platform_configs WHERE platform = ? AND user_id = ?', (platform, user_id))
         exists = cursor.fetchone()
@@ -632,11 +632,11 @@ def add_blacklist(company_name: str, website: str = '', reason: str = '', user_i
         conn.close()
 
 
-def remove_blacklist(company_name: str, website: str = '', user_id: int = None, admin: bool = False) -> bool:
+def remove_blacklist(company_name: str, website: str = '', user_id: int = None) -> bool:
     """取消拉黑"""
     conn = get_connection()
     try:
-        if not admin and user_id:
+        if user_id:
             conn.execute(
                 'DELETE FROM blacklisted_companies WHERE company_name = ? AND (website = ? OR website = \'\') AND user_id = ?',
                 (company_name, website, user_id)
@@ -654,13 +654,13 @@ def remove_blacklist(company_name: str, website: str = '', user_id: int = None, 
         conn.close()
 
 
-def is_blacklisted(company_name: str = '', website: str = '', user_id: int = None, admin: bool = False) -> bool:
+def is_blacklisted(company_name: str = '', website: str = '', user_id: int = None) -> bool:
     """检查是否在拉黑列表中"""
     conn = get_connection()
     try:
         user_where = ''
         user_params = []
-        if not admin and user_id:
+        if user_id:
             user_where = ' AND user_id = ?'
             user_params = [user_id]
         # 按域名精确匹配
@@ -710,13 +710,13 @@ def get_blacklisted_names(user_id: int = None) -> set:
         conn.close()
 
 
-def get_blacklist(page: int = 1, per_page: int = 20, user_id: int = None, admin: bool = False) -> dict:
+def get_blacklist(page: int = 1, per_page: int = 20, user_id: int = None) -> dict:
     """获取拉黑列表（分页）"""
     conn = get_connection()
     try:
         user_where = ''
         user_params = []
-        if not admin and user_id:
+        if user_id:
             user_where = ' WHERE user_id = ?'
             user_params = [user_id]
         total = conn.execute(f'SELECT COUNT(*) FROM blacklisted_companies{user_where}', user_params).fetchone()[0]

@@ -458,7 +458,7 @@ class AdvantageSelector:
         pain_types = [p['type'] for p in pain_points]
 
         # 从素材库获取对应功率类型的优势
-        advantages = get_advantages_by_power_type(power_type, user_id=self.user_id, admin=self.is_admin)
+        advantages = get_advantages_by_power_type(power_type, user_id=self.user_id)
         
         # 计算每个优势的匹配度
         scored = []
@@ -586,13 +586,13 @@ class FABETransformer:
         if 'security' in track.lower() or 'smart home' in track.lower():
             if 'bc' in name or 'cell' in name or '纯黑' in name:
                 # 安防赛道 + BC技术 -> 使用Ring/Arlo案例
-                ring_case = get_ring_case_for_email('smart_home', user_id=self.user_id, admin=self.is_admin)
+                ring_case = get_ring_case_for_email('smart_home', user_id=self.user_id)
                 return ring_case[:200] + '...' if ring_case else ''
             elif 'oem' in name or 'odm' in name or 'custom' in name:
-                ring_case = get_ring_case_for_email('smart_home', user_id=self.user_id, admin=self.is_admin)
+                ring_case = get_ring_case_for_email('smart_home', user_id=self.user_id)
                 return ring_case[:200] + '...' if ring_case else ''
             elif 'ddp' in name or 'logistics' in name:
-                arlo_case = get_arlo_case_for_email('north_america_buyer', user_id=self.user_id, admin=self.is_admin)
+                arlo_case = get_arlo_case_for_email('north_america_buyer', user_id=self.user_id)
                 return arlo_case[:200] + '...' if arlo_case else ''
             elif 'global' in name or 'production' in name or 'supply' in name:
                 return ''
@@ -627,16 +627,16 @@ class MaterialMatcher:
 
         matched = {
             'company_intro': {},
-            'advantages': get_advantages_by_power_type(power_type, user_id=user_id, admin=admin),
-            'brochure': get_brochure_by_power_type(power_type, user_id=user_id, admin=admin),
-            'cases': get_cases_by_track(track, user_id=user_id, admin=admin),
-            'rules': get_case_workflow_rules(track, regions[0] if regions else '', user_id=user_id, admin=admin),
+            'advantages': get_advantages_by_power_type(power_type, user_id=user_id),
+            'brochure': get_brochure_by_power_type(power_type, user_id=user_id),
+            'cases': get_cases_by_track(track, user_id=user_id),
+            'rules': get_case_workflow_rules(track, regions[0] if regions else '', user_id=user_id),
             'custom_selected': [],
         }
         
         # 大功率客户额外获取储能素材
         if '大功率' in power_type:
-            matched['storage'] = get_storage_brochure(user_id=user_id, admin=admin)
+            matched['storage'] = get_storage_brochure(user_id=user_id)
         
         # 用户手动选择的素材（最高优先级）
         if selected_material_ids:
@@ -746,8 +746,8 @@ class EmailComposer:
         body_words = len(body.split())
         if body_words < min_words or body_words > max_words:
             body = _enforce_word_count(body, (min_words + max_words) // 2, min_words, max_words)
-            result['body'] = body
-            result['full_text'] = f"{greeting}\n\n{body}\n\n{signature}"
+            email['body'] = body
+            email['full_text'] = f"{greeting}\n\n{body}\n\n{signature}"
 
         print(f"  主题: {subject}")
         print(f"  称呼: {greeting}")
@@ -1445,7 +1445,7 @@ class EmailWorkflow:
 
         return result
 
-    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None, selected_material_ids=None, skip_refine=False, skip_format=False):
+    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None, selected_material_ids=None, skip_refine=False, skip_format=False, language='en'):
         """使用 DeepSeek V4 Pro 生成邮件（LLM 增强模式）
 
         Args:
@@ -1456,6 +1456,7 @@ class EmailWorkflow:
               - int: 目标字数（自动转范围：min=target-30, max=target+30）
               - dict: {'min': int, 'max': int}（兼容旧前端）
             selected_material_ids: 用户手动选中的素材ID列表
+            language: 邮件语言 (en/fr/de)
         """
         # 统一格式：int → 范围自动计算（容差±10）；dict → 直接使用；None → 默认150
         if target_word_count is None:
@@ -1504,7 +1505,7 @@ class EmailWorkflow:
                 print(f"  搜索失败: {e}")
 
         # 调用 LLM 分析
-        llm_analysis = self.llm.analyze_company(page_text, search_summary, customer_name)
+        llm_analysis = self.llm.analyze_company(page_text, search_summary, customer_name, language=language)
         if llm_analysis:
             print(f"  ✓ LLM 分析成功")
             # 将 LLM 分析结果转换为管线兼容格式
@@ -1548,7 +1549,7 @@ class EmailWorkflow:
         # ===== 节点2: 客户分类（LLM）=====
         print(f"\n[节点2] 客户分类 (LLM)")
         _notify('pain_points', 'running')
-        classification = self.llm.classify_customer(research_result)
+        classification = self.llm.classify_customer(research_result, language=language)
         if classification:
             print(f"  ✓ LLM 分类成功: {classification}")
         else:
@@ -1558,33 +1559,37 @@ class EmailWorkflow:
 
         # ===== 节点3: 优势提炼（LLM）=====
         print(f"\n[节点3] 优势提炼 (LLM)")
-        _notify('material', 'running')
+        _notify('advantages', 'running')
         # 构建素材库文本摘要
         from materials.unified_interface import get_advantages_by_power_type
         power_type = classification.get('power_type', 'High Power')
-        raw_advantages = get_advantages_by_power_type(power_type, user_id=self.user_id, admin=self.is_admin)
+        raw_advantages = get_advantages_by_power_type(power_type, user_id=self.user_id)
         material_summary = '\n'.join([
             f"- {a.get('name', '')}: {a.get('tech_features', '')} (Scope: {a.get('scope', '')})"
             for a in raw_advantages
         ])
-        advantages = self.llm.select_advantages(classification, research_result, material_summary)
+        advantages = self.llm.select_advantages(classification, research_result, material_summary, language=language)
         if advantages:
             print(f"  ✓ LLM 优势提炼成功: {len(advantages)} 个")
         else:
             print(f"  ⚠ LLM 优势提炼失败，回退到规则引擎")
             advantages = self.advantage_selector.select(classification, research_result)
+        _notify('advantages', 'completed')
 
         # ===== 节点4: FABE 话术（LLM）=====
         print(f"\n[节点4] FABE 话术 (LLM)")
-        fabe_points = self.llm.generate_fabe(advantages, classification, research_result)
+        _notify('fabe', 'running')
+        fabe_points = self.llm.generate_fabe(advantages, classification, research_result, language=language)
         if fabe_points:
             print(f"  ✓ LLM FABE 生成成功: {len(fabe_points)} 个")
         else:
             print(f"  ⚠ LLM FABE 失败，回退到规则引擎")
             fabe_points = self.fabe_transformer.transform(advantages, classification, research_result)
+        _notify('fabe', 'completed')
 
         # ===== 节点5: 素材匹配（LLM）=====
         print(f"\n[节点5] 素材匹配 (LLM)")
+        _notify('material', 'running')
         # 获取公司信息：先从发信人信息合并，再从 company_info.json 补充
         company_info = {}
         # 优先从发信人信息中获取
@@ -1602,7 +1607,7 @@ class EmailWorkflow:
                 for key, val in json_info.items():
                     if not company_info.get(key):
                         company_info[key] = val
-        materials = self.llm.match_materials(classification, research_result, company_info)
+        materials = self.llm.match_materials(classification, research_result, company_info, language=language)
         if materials:
             print(f"  ✓ LLM 素材匹配成功")
         else:
@@ -1610,7 +1615,7 @@ class EmailWorkflow:
             materials = self.material_matcher.match(
                 classification, research_result,
                 selected_material_ids=selected_material_ids,
-                user_id=self.user_id, admin=self.is_admin
+                user_id=self.user_id
             )
         _notify('material', 'completed')
 
@@ -1661,7 +1666,8 @@ class EmailWorkflow:
             research_result, classification, fabe_points, materials,
             contact_name=contact_name_for_email, email_type=email_type,
             has_website=has_website, company_info=company_info,
-            target_word_count=target_word_count
+            target_word_count=target_word_count,
+            language=language
         )
 
         if llm_email.get('error'):
@@ -1690,7 +1696,7 @@ class EmailWorkflow:
             print(f"\n[节点7] 邮件润色 (LLM)")
             _notify('refine', 'running')
             # 传入纯正文给润色（不含 greeting/signature）
-            refined = self.llm.refine_email(email['subject'], email['body'], target_word_count=target_word_count, customer_name=customer_name)
+            refined = self.llm.refine_email(email['subject'], email['body'], target_word_count=target_word_count, customer_name=customer_name, language=language)
             if not refined.get('error'):
                 email['subject'] = refined['subject']
                 # LLM 润色返回的 body 也可能包含 greeting/signature，需要剥离
@@ -1709,7 +1715,7 @@ class EmailWorkflow:
         if not skip_format:
             print(f"\n[节点7.5] 邮件排版 (LLM)")
             _notify('format', 'running')
-            format_result = self.llm.format_email(email['body'], target_words=_original_target)
+            format_result = self.llm.format_email(email['body'], target_words=_original_target, language=language)
             if not format_result.get('error'):
                 email['body'] = format_result['body']
                 email['full_text'] = f"{email['greeting']}\n\n{email['body']}\n\n{email['signature']}"
@@ -1722,7 +1728,7 @@ class EmailWorkflow:
 
         # ===== 节点8: HTML 渲染（LLM）=====
         print(f"\n[节点8] HTML 渲染 (LLM)")
-        html = self.llm.render_html(email)
+        html = self.llm.render_html(email, language=language)
         if html:
             print(f"  ✓ LLM HTML 渲染完成")
         else:
@@ -1778,6 +1784,7 @@ class EmailWorkflow:
             'full_text': email['full_text'],
             'html': html,
             'word_count': body_words,
+            'language': language,
             'classification': classification,
             'fabe_points': fabe_points
         }
@@ -1802,17 +1809,17 @@ class EmailWorkflow:
 
         # ===== 1. 读取序列和步骤信息 =====
         admin = self.is_admin
-        sequence = get_sequence(sequence_id, user_id=user_id, admin=admin)
+        sequence = get_sequence(sequence_id, user_id=user_id)
         if not sequence:
             print(f"  ✗ 序列不存在: sequence_id={sequence_id}")
-            update_step(step_id, user_id=user_id, admin=admin,
+            update_step(step_id, user_id=user_id,
                         error_message=f'序列不存在: sequence_id={sequence_id}')
             return None
 
-        step = get_step(step_id, user_id=user_id, admin=admin)
+        step = get_step(step_id, user_id=user_id)
         if not step:
             print(f"  ✗ 步骤不存在: step_id={step_id}")
-            update_step(step_id, user_id=user_id, admin=admin,
+            update_step(step_id, user_id=user_id,
                         error_message=f'步骤不存在: step_id={step_id}')
             return None
 
@@ -1904,7 +1911,7 @@ class EmailWorkflow:
         if purpose == 'case_study':
             # 按 track 加载案例素材
             try:
-                cases = get_cases_by_track(track, user_id=user_id, admin=admin)
+                cases = get_cases_by_track(track, user_id=user_id)
                 if cases:
                     # 取第一个最相关的案例
                     case_material = cases[0]
@@ -1915,7 +1922,7 @@ class EmailWorkflow:
         elif purpose == 'resource':
             # 按 power_type 加载宣传册素材
             try:
-                brochure_material = get_brochure_by_power_type(power_type, user_id=user_id, admin=admin)
+                brochure_material = get_brochure_by_power_type(power_type, user_id=user_id)
                 if brochure_material:
                     print(f"  ✓ 加载宣传册素材: {list(brochure_material.keys())}")
             except Exception as e:
@@ -1962,7 +1969,7 @@ class EmailWorkflow:
             )
         except Exception as e:
             print(f"  ✗ 构建 Prompt 失败: {e}")
-            update_step(step_id, user_id=user_id, admin=admin,
+            update_step(step_id, user_id=user_id,
                         error_message=f'构建 Prompt 失败: {e}')
             return None
 
@@ -1981,7 +1988,7 @@ class EmailWorkflow:
         if error or not content:
             error_msg = error or 'LLM 返回空内容'
             print(f"  ✗ LLM 调用失败: {error_msg}")
-            update_step(step_id, user_id=user_id, admin=admin,
+            update_step(step_id, user_id=user_id,
                         error_message=f'LLM 调用失败: {error_msg}')
             return None
 
@@ -2001,7 +2008,7 @@ class EmailWorkflow:
 
             if not body:
                 print(f"  ✗ LLM 返回的 body 为空")
-                update_step(step_id, user_id=user_id, admin=admin,
+                update_step(step_id, user_id=user_id,
                             error_message='LLM 返回的 body 为空')
                 return None
 
@@ -2010,7 +2017,7 @@ class EmailWorkflow:
             error_msg = f'JSON 解析失败: {e}'
             print(f"  ✗ {error_msg}")
             print(f"  原始内容: {content[:500]}")
-            update_step(step_id, user_id=user_id, admin=admin,
+            update_step(step_id, user_id=user_id,
                         error_message=error_msg)
             return None
 
@@ -2054,7 +2061,7 @@ class EmailWorkflow:
 
         # ===== 13. 保存结果到 follow_up_steps =====
         try:
-            update_step(step_id, user_id=user_id, admin=admin,
+            update_step(step_id, user_id=user_id,
                         subject=subject, body=body, greeting=greeting,
                         signature=signature, word_count=final_word_count,
                         status='pending')
@@ -2078,7 +2085,8 @@ class EmailWorkflow:
     def generate_email(self, customer_name: str, website: str,
                         progress_callback=None, target_word_count=None,
                         selected_material_ids: list = None,
-                        skip_refine=False, skip_format=False) -> Dict:
+                        skip_refine=False, skip_format=False,
+                        language: str = 'en') -> Dict:
         """
         一键生成开发信
 
@@ -2088,6 +2096,7 @@ class EmailWorkflow:
             progress_callback: 进度回调函数，接收(step_id, status)参数
             target_word_count: 目标字数范围 {'min': int, 'max': int}
             selected_material_ids: 用户手动选中的素材ID列表
+            language: 邮件语言 (en/fr/de)，默认英语
 
         Returns:
             包含主题、正文、HTML的完整邮件字典
@@ -2095,7 +2104,7 @@ class EmailWorkflow:
         has_website = bool(website and website.strip() and website.strip().startswith('http'))
 
         # 所有模式都使用 LLM 生成（不再区分模板/LLM 模式）
-        return self._generate_with_llm(customer_name, website, progress_callback, target_word_count, selected_material_ids, skip_refine=skip_refine, skip_format=skip_format)
+        return self._generate_with_llm(customer_name, website, progress_callback, target_word_count, selected_material_ids, skip_refine=skip_refine, skip_format=skip_format, language=language)
 
 
 if __name__ == '__main__':

@@ -7,12 +7,20 @@ import json
 import os
 import time
 import random
+from typing import Dict
 from openai import OpenAI
 from openai import APITimeoutError, APIConnectionError, RateLimitError, InternalServerError
 
 
 class LLMEmailClient:
     """DeepSeek 大模型邮件生成客户端"""
+
+    # 支持的语言映射
+    LANGUAGE_NAMES = {
+        'en': 'English',
+        'fr': 'French',
+        'de': 'German',
+    }
 
     def __init__(self, api_key=None, base_url=None, model=None, user_id=None):
         self.user_id = user_id
@@ -34,15 +42,19 @@ class LLMEmailClient:
         """从数据库加载 DeepSeek 配置"""
         try:
             from database.api_config_models import get_api_config
-            cfg = get_api_config('DeepSeek')
+            # 优先按 user_id 查找，确保用户隔离
+            cfg = get_api_config('DeepSeek', user_id=self.user_id)
+            # 如果当前用户没有配置，尝试获取任意活跃配置作为回退
+            if not cfg:
+                cfg = get_api_config('DeepSeek')
             if cfg:
                 return {
                     'api_key': cfg.get('api_key', ''),
                     'base_url': cfg.get('base_url', ''),
                     'model': cfg.get('model', '')
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[LLMClient] 加载数据库配置失败: {e}")
         return {}
 
     def _get_client(self):
@@ -64,6 +76,10 @@ class LLMEmailClient:
 
     def is_available(self):
         return bool(self.api_key)
+
+    def _get_lang_name(self, language):
+        """获取语言的英文名称"""
+        return self.LANGUAGE_NAMES.get(language, 'English')
 
     def _call(self, system_prompt, user_prompt, max_tokens=1000, temperature=0.7, label='unknown', response_format=None):
         """统一的 API 调用方法，带重试机制和用量记录"""
@@ -105,7 +121,7 @@ class LLMEmailClient:
 
     # ==================== 节点1: 公司背调分析 ====================
 
-    def analyze_company(self, page_text, search_summary, customer_name):
+    def analyze_company(self, page_text, search_summary, customer_name, language='en'):
         """
         分析公司网页文本和搜索结果，输出结构化的背调报告。
 
@@ -113,14 +129,16 @@ class LLMEmailClient:
             page_text: 网页全文（最多5000字符）
             search_summary: 搜索引擎结果摘要
             customer_name: 客户公司名称
+            language: 输出语言 (en/fr/de)
 
         Returns:
             dict or None: 结构化分析结果，失败返回 None
         """
-        system_prompt = """You are a professional B2B market research analyst. Analyze the following company information and output a JSON object.
+        lang_name = self._get_lang_name(language)
+        system_prompt = f"""You are a professional B2B market research analyst. Analyze the following company information and output a JSON object.
 
 Output ONLY valid JSON, no markdown, no explanation. JSON structure:
-{
+{{
   "main_business": "brief description of what the company does",
   "target_markets": ["market1", "market2"],
   "business_model": "distributor" | "manufacturer" | "brand_owner" | "installer" | "unknown",
@@ -130,9 +148,9 @@ Output ONLY valid JSON, no markdown, no explanation. JSON structure:
   "solar_products": ["solar product1"],
   "power_tendency": "high_power" | "low_power" | "mixed" | "unknown",
   "track": "Security & Smart Home Hardware" | "Outdoor & Portable Power" | "Automation & Gate Systems" | "Agriculture & Livestock" | "Energy Storage" | "Consumer Electronics" | "General",
-  "pain_points": [{"type": "keyword", "desc": "description"}],
-  "opportunities": [{"type": "keyword", "desc": "description"}]
-}
+  "pain_points": [{{"type": "keyword", "desc": "description"}}],
+  "opportunities": [{{"type": "keyword", "desc": "description"}}]
+}}
 
 Rules:
 - If the company sells security cameras, trail cameras, smart home devices → industry=security
@@ -143,7 +161,8 @@ Rules:
 - has_solar_products: true only if they explicitly sell solar panels, solar chargers, or solar-powered devices
 - Limit target_markets to top 3
 - Limit core_products to top 5
-- Limit pain_points and opportunities to top 3 each"""
+- Limit pain_points and opportunities to top 3 each
+- All text field values (main_business, desc, product names, etc.) MUST be in {lang_name}"""
 
         user_prompt = f"""Company Name: {customer_name}
 
@@ -172,7 +191,7 @@ Analyze this company and output the JSON."""
 
     # ==================== 节点4: FABE 话术生成 ====================
 
-    def generate_fabe(self, advantages, classification, research_result):
+    def generate_fabe(self, advantages, classification, research_result, language='en'):
         """
         基于素材库优势和客户信息，生成 FABE 话术。
 
@@ -180,10 +199,12 @@ Analyze this company and output the JSON."""
             advantages: 素材库优势列表 [{name, tech_features, scope, customer_value}, ...]
             classification: 客户分类 {power_type, track, case_tag, priorities}
             research_result: 背调结果
+            language: 输出语言 (en/fr/de)
 
         Returns:
             list or None: FABE 列表 [{advantage_name, F, A, B, E}, ...]
         """
+        lang_name = self._get_lang_name(language)
         company_name = research_result.get('module1_profile', {}).get('company_name', 'the customer')
         track = classification.get('track', 'General')
         pain_points = research_result.get('module3_pain_points', [])
@@ -194,11 +215,11 @@ Analyze this company and output the JSON."""
             for a in advantages[:4]
         ])
 
-        system_prompt = """You are a B2B sales copywriting expert for a solar energy company.
+        system_prompt = f"""You are a B2B sales copywriting expert for a solar energy company.
 Generate FABE (Feature-Advantage-Benefit-Evidence) selling points for each advantage.
 
 Output ONLY valid JSON array, no markdown. Each item:
-{"advantage_name": "name", "F": "feature description", "A": "what this means for the customer", "B": "how it solves their specific pain point", "E": "brief evidence or credibility point"}
+{{"advantage_name": "name", "F": "feature description", "A": "what this means for the customer", "B": "how it solves their specific pain point", "E": "brief evidence or credibility point"}}
 
 Rules:
 - F: Describe the technical feature clearly in 1-2 sentences
@@ -206,7 +227,8 @@ Rules:
 - B: Connect the advantage to the customer's specific pain points or industry needs
 - E: Include a brief credibility point (certification, customer count, years of experience, or case study reference)
 - Keep each field concise (1-2 sentences max)
-- Write in professional business English"""
+- Write in professional business {lang_name}
+- All output text MUST be in {lang_name}"""
 
         user_prompt = f"""Customer: {company_name}
 Industry Track: {track}
@@ -237,7 +259,7 @@ Generate FABE for each advantage."""
 
     def compose_email(self, research_result, classification, fabe_points, materials,
                        contact_name=None, email_type='public', has_website=True, company_info=None,
-                       target_word_count=None):
+                       target_word_count=None, language='en'):
         """
         基于全部管线上下文生成完整开发信。
 
@@ -251,10 +273,12 @@ Generate FABE for each advantage."""
             has_website: 客户是否有网站
             company_info: 我方公司信息
             target_word_count: 目标字数范围 {'min': int, 'max': int}
+            language: 输出语言 (en/fr/de)
 
         Returns:
             dict: {'subject': str, 'body': str, 'error': str or None}
         """
+        lang_name = self._get_lang_name(language)
         # 默认字数范围（容差±10）
         if target_word_count is None:
             target_word_count = 150
@@ -392,12 +416,14 @@ CONTENT RULES:
 - NEVER end the email with a pain point. The Solution section MUST come before the CTA.
 - Focus on how our solar solutions solve THEIR specific pain points
 - {"Do NOT mention visiting their website." if not has_website else "Reference their products/business naturally."}
-- Write in English
+- Write in {lang_name}
 - Use concrete, specific language — avoid vague buzzwords like "innovative", "leading", "cutting-edge", "state-of-the-art"
 - Every claim MUST be backed by a specific feature, number, or case study from the FABE points
 - Output format: First line must be "SUBJECT: <email subject line>", then a blank line, then the email body
+- The subject line MUST be in {lang_name}
 - MUST end with a CTA and do NOT truncate the email
 - DIVERSITY IS KEY: vary your sentence structure, vocabulary, and phrasing. No two emails should read the same way.
+- ENTIRE email (subject, body, all text) MUST be in {lang_name}. This is a HARD requirement.
 
 {company_block}"""
 
@@ -491,7 +517,7 @@ INSTRUCTIONS:
 
     # ==================== 节点7: 邮件润色 ====================
 
-    def refine_email(self, subject, body, target_word_count=None, customer_name=None):
+    def refine_email(self, subject, body, target_word_count=None, customer_name=None, language='en'):
         """
         润色精修邮件内容。
 
@@ -500,10 +526,12 @@ INSTRUCTIONS:
             body: 邮件正文
             target_word_count: 目标字数范围 {'min': int, 'max': int}
             customer_name: 客户公司名称（用于保持 greeting 一致性）
+            language: 输出语言 (en/fr/de)
 
         Returns:
             dict: {'subject': str, 'body': str, 'error': str or None}
         """
+        lang_name = self._get_lang_name(language)
         if target_word_count is None:
             target_word_count = 150
         if isinstance(target_word_count, int):
@@ -519,7 +547,7 @@ INSTRUCTIONS:
         system_prompt = f"""You are an expert B2B email editor. Refine the following cold email while preserving its structure and core message.
 
 Rules:
-1. Keep the professional business American English tone
+1. Keep the professional business {lang_name} tone
 2. Remove redundant phrases or filler words, BUT keep all pain point analysis and specific claims intact
 3. Ensure the email length is between {min_words} and {max_words} words (target: {_exact_target}). This is a HARD constraint — if under {min_words}, expand relevant points; if over {max_words}, trim filler words.
 4. Preserve the structure: Greeting + Self-intro → Opening → Pain Point 1 → Pain Point 2 → Solution & Evidence → CTA → Signature
@@ -530,7 +558,8 @@ Rules:
 9. MUST NOT introduce generic openers like "How are you", "Hope you're doing well", "I hope this email finds you well"
 10. MUST keep the greeting format: "Hi [First Name]," or "Hi [Company] Team," — do NOT change to "Dear"
 11. MUST keep the signature block EXACTLY as it appears in the original — do NOT replace real names with placeholders like [Your Name]
-12. MUST keep the self-introduction sentence (e.g., "I'm [Sender Name] from [Company].") right after the greeting — do NOT remove or change it{greeting_instruction}"""
+12. MUST keep the self-introduction sentence (e.g., "I'm [Sender Name] from [Company].") right after the greeting — do NOT remove or change it{greeting_instruction}
+13. The ENTIRE refined email (subject, body, all text) MUST be in {lang_name}. This is a HARD requirement."""
 
         user_prompt = f"""SUBJECT: {subject}
 
@@ -554,16 +583,18 @@ Refine this email now."""
 
     # ==================== 节点2: 客户分类 ====================
 
-    def classify_customer(self, research_result):
+    def classify_customer(self, research_result, language='en'):
         """
         基于背调结果进行客户分类。
 
         Args:
             research_result: 背调结果字典
+            language: 输出语言 (en/fr/de)
 
         Returns:
             dict or None: {power_type, track, case_tag, priorities}
         """
+        lang_name = self._get_lang_name(language)
         profile = research_result.get('module1_profile', {})
         products = research_result.get('module2_products', {})
         pain_points = research_result.get('module3_pain_points', [])
@@ -575,21 +606,22 @@ Refine this email now."""
         industry = profile.get('industry', '')
         core_products = profile.get('core_products', [])
 
-        system_prompt = """You are a B2B sales strategist. Classify the customer based on their profile.
+        system_prompt = f"""You are a B2B sales strategist. Classify the customer based on their profile.
 
 Output ONLY valid JSON, no markdown. Structure:
-{
+{{
   "power_type": "High Power" | "Low Power",
   "track": "Security & Smart Home Hardware" | "Outdoor & Portable Power" | "Automation & Gate Systems" | "Agriculture & Livestock" | "Energy Storage" | "Consumer Electronics" | "General",
   "case_tag": "Ring / Arlo / Eufy" | "No Matched Case",
   "priorities": ["priority1", "priority2", "priority3"]
-}
+}}
 
 Rules:
 - power_type: High Power if they deal with large solar installations, commercial energy storage, or high-wattage products. Low Power for portable, consumer, or small-scale products.
 - track: Based on their primary industry and products.
 - case_tag: Only "Ring / Arlo / Eufy" if they are in security/smart home and explicitly sell or distribute Ring, Arlo, or Eufy products. Otherwise "No Matched Case".
-- priorities: Extract top 3 pain point types or business priorities from the analysis."""
+- priorities: Extract top 3 pain point types or business priorities from the analysis.
+- The "priorities" array values MUST be in {lang_name}."""
 
         user_prompt = f"""Customer: {company_name}
 Industry: {industry}
@@ -615,7 +647,7 @@ Classify this customer."""
 
     # ==================== 节点3: 优势提炼 ====================
 
-    def select_advantages(self, classification, research_result, material_library):
+    def select_advantages(self, classification, research_result, material_library, language='en'):
         """
         基于客户分类和背调结果，从素材库中提炼最相关的优势。
 
@@ -623,10 +655,12 @@ Classify this customer."""
             classification: 客户分类结果
             research_result: 背调结果
             material_library: 素材库内容文本
+            language: 输出语言 (en/fr/de)
 
         Returns:
             list or None: 优势列表
         """
+        lang_name = self._get_lang_name(language)
         company_name = research_result.get('module1_profile', {}).get('company_name', 'Customer')
         pain_points = research_result.get('module3_pain_points', [])
         track = classification.get('track', 'General')
@@ -634,16 +668,17 @@ Classify this customer."""
 
         pain_summary = '; '.join([p.get('desc', '') for p in pain_points[:3]]) if pain_points else 'None'
 
-        system_prompt = """You are a B2B sales strategist. From the provided advantage library, select the TOP 4 most relevant advantages for this specific customer.
+        system_prompt = f"""You are a B2B sales strategist. From the provided advantage library, select the TOP 4 most relevant advantages for this specific customer.
 
 Output ONLY valid JSON array, no markdown. Each item:
-{"name": "advantage name", "tech_features": "technical description", "scope": "applicable scope", "customer_value": "why it matters to this customer", "relevance_score": 1-10}
+{{"name": "advantage name", "tech_features": "technical description", "scope": "applicable scope", "customer_value": "why it matters to this customer", "relevance_score": 1-10}}
 
 Rules:
 - Select advantages that directly address the customer's pain points and industry
 - Explain WHY each advantage is relevant to THIS specific customer
 - relevance_score: 10 = perfectly matched, 1 = barely relevant
-- Prioritize advantages that solve their specific pain points"""
+- Prioritize advantages that solve their specific pain points
+- All text field values (name, tech_features, scope, customer_value) MUST be in {lang_name}"""
 
         user_prompt = f"""Customer: {company_name}
 Industry Track: {track}
@@ -670,7 +705,7 @@ Select the top 4 most relevant advantages and explain why."""
 
     # ==================== 节点5: 素材匹配 ====================
 
-    def match_materials(self, classification, research_result, company_info):
+    def match_materials(self, classification, research_result, company_info, language='en'):
         """
         基于客户分类和背调结果，智能匹配素材库内容。
 
@@ -678,34 +713,36 @@ Select the top 4 most relevant advantages and explain why."""
             classification: 客户分类
             research_result: 背调结果
             company_info: 我方公司信息
+            language: 输出语言 (en/fr/de)
 
         Returns:
             dict or None: 匹配到的素材
         """
+        lang_name = self._get_lang_name(language)
         company_name = research_result.get('module1_profile', {}).get('company_name', 'Customer')
         track = classification.get('track', 'General')
         power_type = classification.get('power_type', 'High Power')
         pain_points = research_result.get('module3_pain_points', [])
         pain_summary = '; '.join([p.get('desc', '') for p in pain_points[:3]]) if pain_points else 'None'
 
-        system_prompt = """You are a B2B marketing content strategist. Based on the customer profile, assemble the most relevant sales materials.
+        system_prompt = f"""You are a B2B marketing content strategist. Based on the customer profile, assemble the most relevant sales materials.
 
 Output ONLY valid JSON, no markdown. Structure:
-{
+{{
   "company_intro": "brief company introduction tailored to this customer",
   "advantages": ["advantage1", "advantage2", "advantage3", "advantage4"],
   "brochure": "relevant brochure content summary",
-  "cases": [{"title": "case title", "summary": "case summary relevant to customer"}],
+  "cases": [{{"title": "case title", "summary": "case summary relevant to customer"}}],
   "rules": "case workflow rules for this customer type",
   "storage": "energy storage content if applicable"
-}
+}}
 
 Rules:
 - company_intro: Tailor the intro to highlight aspects most relevant to this customer's industry
 - advantages: List 4 key advantages that match their needs
 - cases: Provide 2-3 relevant case studies
 - storage: Only include if power_type is High Power or they deal with energy storage
-- All content should be in English"""
+- All content MUST be in {lang_name}"""
 
         user_prompt = f"""Customer: {company_name}
 Track: {track}
@@ -731,17 +768,19 @@ Assemble the most relevant sales materials."""
 
     # ==================== 节点7.5: 邮件排版（LLM）====================
 
-    def format_email(self, body: str, target_words: int = None) -> Dict:
+    def format_email(self, body: str, target_words: int = None, language='en') -> Dict:
         """
         使用 LLM 对邮件正文进行排版美化：仅调整段落结构和空行，不删改任何文字。
 
         Args:
             body: 邮件正文（纯文本）
             target_words: 目标字数（用于校验，排版不应大幅改变字数）
+            language: 邮件语言 (en/fr/de)
 
         Returns:
             dict: {'body': str, 'word_count': int} 或 {'error': str}
         """
+        lang_name = self._get_lang_name(language)
         original_word_count = len(body.split())
 
         system_prompt = f"""You are a text formatting assistant. Your task is ONLY to add proper paragraph breaks to the given email text.
@@ -783,16 +822,18 @@ Output ONLY the text with paragraph breaks added. Nothing else."""
 
     # ==================== 节点8: HTML 渲染 ====================
 
-    def render_html(self, email):
+    def render_html(self, email, language='en'):
         """
         将邮件内容渲染为 HTML 格式。
 
         Args:
             email: 邮件字典 {subject, greeting, body, signature}
+            language: 邮件语言 (en/fr/de)
 
         Returns:
             str or None: HTML 字符串
         """
+        lang_name = self._get_lang_name(language)
         system_prompt = """You are an HTML email developer. Convert the following email into a professional HTML email template.
 
 Requirements:
@@ -830,8 +871,9 @@ Generate the HTML email template."""
     # ==================== 原有端到端生成方法（保留兼容） ====================
 
     def generate_email(self, customer_name, website, contact_name=None,
-                       email_type='public', company_info=None, product_info=None):
+                       email_type='public', company_info=None, product_info=None, language='en'):
         """端到端生成邮件（简单模式，不经过管线）"""
+        lang_name = self._get_lang_name(language)
         client = self._get_client()
         if not client:
             return {'subject': '', 'body': '', 'error': 'API Key 未配置'}
@@ -839,7 +881,7 @@ Generate the HTML email template."""
         company_info = company_info or {}
         greeting_target = contact_name if contact_name and email_type == 'personal' else f'{customer_name} Team'
 
-        system_prompt = """You are a professional B2B sales representative for a solar energy company.
+        system_prompt = f"""You are a professional B2B sales representative for a solar energy company.
 Your task is to write a personalized cold email to a potential customer.
 
 STRICT FORMAT RULES:
@@ -847,7 +889,7 @@ STRICT FORMAT RULES:
    - Public email / no specific contact: "Hi [Company Name] Team,"
    - Has contact person name: "Hi [First Name],"
    - NEVER use "Dear", always use "Hi"
-2. Body: Free-form, professional business American English.
+2. Body: Free-form, professional business {lang_name}.
    - MUST NOT use generic openers like "How are you", "I hope this email finds you well"
    - Be direct, concise, and specific to the recipient's business
 3. Closing & Signature (FIXED order, NEVER change):
@@ -862,7 +904,8 @@ CONTENT RULES:
 - Must include a clear call-to-action (CTA)
 - Focus on how solar solutions can benefit THEIR specific business
 - Do NOT mention visiting their website if no website is provided
-- Write in English
+- Write in {lang_name}
+- The ENTIRE email (subject, body, greeting, signature) MUST be in {lang_name}
 - Output format: First line is "SUBJECT: <subject>", then a blank line, then the body"""
 
         # 加载邮件规范（按用户ID隔离）

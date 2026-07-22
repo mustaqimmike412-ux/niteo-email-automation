@@ -383,7 +383,7 @@ def get_active_send_tasks(user_id=None, admin=False):
         cursor = conn.cursor()
         params = []
         user_where = ""
-        if not admin and user_id:
+        if user_id:
             user_where = " AND user_id = ?"
             params = [user_id]
         cursor.execute(f'''
@@ -429,7 +429,7 @@ def get_send_task_items(task_id, user_id=None, admin=False):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        if not admin and user_id:
+        if user_id:
             cursor.execute('''
                 SELECT email_id, customer_id, email_address, contact_name, email_type,
                        subject, greeting, item_status, retry_count, max_retries,

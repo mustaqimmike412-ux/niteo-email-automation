@@ -22,12 +22,12 @@ MATERIAL_LIBRARY = {
 }
 
 
-def get_material(material_key, user_id=None, admin=False):
+def get_material(material_key, user_id=None):
     """从数据库查询素材（支持 user_id 隔离）"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        if user_id and not admin:
+        if user_id:
             cursor.execute(
                 'SELECT content_json FROM materials WHERE material_key = ? AND is_active = 1 AND (user_id IS NULL OR user_id = ?)',
                 (material_key, user_id),
@@ -46,11 +46,11 @@ def get_material(material_key, user_id=None, admin=False):
     return MATERIAL_LIBRARY.get(material_key, {})
 
 
-def get_material_library(user_id=None, admin=False):
+def get_material_library(user_id=None):
     """获取完整素材库（支持 user_id 隔离）"""
     try:
         from database.material_models import get_material_library_db
-        result = get_material_library_db(user_id=user_id, admin=admin)
+        result = get_material_library_db(user_id=user_id)
         if result:
             return result
     except Exception:
@@ -58,10 +58,10 @@ def get_material_library(user_id=None, admin=False):
     return MATERIAL_LIBRARY
 
 
-def get_advantages_by_power_type(power_type, user_id=None, admin=False):
+def get_advantages_by_power_type(power_type, user_id=None):
     """根据功率类型获取优势列表（按 user_id 隔离）"""
     try:
-        result = get_advantages_by_power_type_db(power_type, user_id=user_id, admin=admin)
+        result = get_advantages_by_power_type_db(power_type, user_id=user_id)
         if result:
             return result
     except Exception:
@@ -69,10 +69,10 @@ def get_advantages_by_power_type(power_type, user_id=None, admin=False):
     return []
 
 
-def get_cases_by_track(track, user_id=None, admin=False):
+def get_cases_by_track(track, user_id=None):
     """根据赛道获取案例列表（按 user_id 隔离）"""
     try:
-        result = get_cases_by_track_db(track, user_id=user_id, admin=admin)
+        result = get_cases_by_track_db(track, user_id=user_id)
         if result:
             return result
     except Exception:
@@ -80,10 +80,10 @@ def get_cases_by_track(track, user_id=None, admin=False):
     return []
 
 
-def get_brochure_by_power_type(power_type, user_id=None, admin=False):
+def get_brochure_by_power_type(power_type, user_id=None):
     """根据功率类型获取宣传册素材（按 user_id 隔离）"""
     try:
-        result = get_brochure_by_power_type_db(power_type, user_id=user_id, admin=admin)
+        result = get_brochure_by_power_type_db(power_type, user_id=user_id)
         if result:
             return result
     except Exception:
@@ -91,10 +91,10 @@ def get_brochure_by_power_type(power_type, user_id=None, admin=False):
     return {}
 
 
-def get_storage_brochure(user_id=None, admin=False):
+def get_storage_brochure(user_id=None):
     """获取储能宣传册素材（按 user_id 隔离）"""
     try:
-        result = get_storage_brochure_db(user_id=user_id, admin=admin)
+        result = get_storage_brochure_db(user_id=user_id)
         if result:
             return result
     except Exception:
@@ -102,10 +102,10 @@ def get_storage_brochure(user_id=None, admin=False):
     return {}
 
 
-def get_case_workflow_rules(track, region="", user_id=None, admin=False):
+def get_case_workflow_rules(track, region="", user_id=None):
     """根据赛道和地区获取案例调用规则（按 user_id 隔离）"""
     try:
-        result = get_case_workflow_rules_db(track, region, user_id=user_id, admin=admin)
+        result = get_case_workflow_rules_db(track, region, user_id=user_id)
         if result:
             return result
     except Exception:
@@ -113,10 +113,10 @@ def get_case_workflow_rules(track, region="", user_id=None, admin=False):
     return {"case_priority": [], "tech_priority": [], "delivery": ""}
 
 
-def get_ring_case_for_email(customer_type, user_id=None, admin=False):
+def get_ring_case_for_email(customer_type, user_id=None):
     """从数据库获取 Ring 案例话术（按 user_id 隔离）"""
     try:
-        materials = get_materials_by_type('case_study', user_id=user_id, admin=admin)
+        materials = get_materials_by_type('case_study', user_id=user_id)
         for mat in materials:
             content = mat.get('content', {})
             name = mat.get('name', '').lower()
@@ -127,10 +127,10 @@ def get_ring_case_for_email(customer_type, user_id=None, admin=False):
     return ""
 
 
-def get_arlo_case_for_email(customer_type, user_id=None, admin=False):
+def get_arlo_case_for_email(customer_type, user_id=None):
     """从数据库获取 Arlo 案例话术（按 user_id 隔离）"""
     try:
-        materials = get_materials_by_type('case_study', user_id=user_id, admin=admin)
+        materials = get_materials_by_type('case_study', user_id=user_id)
         for mat in materials:
             content = mat.get('content', {})
             name = mat.get('name', '').lower()
@@ -141,10 +141,10 @@ def get_arlo_case_for_email(customer_type, user_id=None, admin=False):
     return ""
 
 
-def get_eufy_case_for_email(customer_type, user_id=None, admin=False):
+def get_eufy_case_for_email(customer_type, user_id=None):
     """从数据库获取 Eufy 案例话术（按 user_id 隔离）"""
     try:
-        materials = get_materials_by_type('case_study', user_id=user_id, admin=admin)
+        materials = get_materials_by_type('case_study', user_id=user_id)
         for mat in materials:
             content = mat.get('content', {})
             name = mat.get('name', '').lower()

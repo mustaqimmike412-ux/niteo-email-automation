@@ -49,14 +49,14 @@ def persist_send_task_meta(task_id, task_type='manual', status='pending', custom
         print(f"  ⚠ 持久化任务元数据失败: {e}")
 
 
-def get_active_send_tasks(user_id=None, admin=False):
+def get_active_send_tasks(user_id=None):
     """获取所有活跃任务（running/paused）和最近24小时完成的任务"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
         params = []
         user_where = ""
-        if not admin and user_id:
+        if user_id:
             user_where = " AND user_id = ?"
             params = [user_id]
         cursor.execute(f'''
@@ -97,12 +97,12 @@ def get_active_send_tasks(user_id=None, admin=False):
         return []
 
 
-def get_send_task_items(task_id, user_id=None, admin=False):
+def get_send_task_items(task_id, user_id=None):
     """获取指定任务的所有邮件项"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        if not admin and user_id:
+        if user_id:
             cursor.execute('''
                 SELECT email_id, customer_id, email_address, contact_name, email_type,
                        subject, greeting, item_status, retry_count, max_retries,
@@ -138,7 +138,7 @@ def get_send_task_items(task_id, user_id=None, admin=False):
         return []
 
 
-def get_statistics(user_id=None, admin=False):
+def get_statistics(user_id=None):
     """获取数据库统计信息"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -147,7 +147,7 @@ def get_statistics(user_id=None, admin=False):
 
     user_where = ""
     user_params = []
-    if not admin and user_id:
+    if user_id:
         user_where = " WHERE user_id = ?"
         user_params = [user_id]
 
@@ -172,10 +172,10 @@ def get_statistics(user_id=None, admin=False):
     stats['contact_sources'] = cursor.fetchall()
 
     # 邮件发送统计
-    cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent'{(' AND user_id = ?' if not admin and user_id else '')}", user_params if not admin and user_id else [])
+    cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent'{(' AND user_id = ?' if user_id else '')}", user_params if user_id else [])
     stats['sent_count'] = cursor.fetchone()[0]
 
-    cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'failed'{(' AND user_id = ?' if not admin and user_id else '')}", user_params if not admin and user_id else [])
+    cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'failed'{(' AND user_id = ?' if user_id else '')}", user_params if user_id else [])
     stats['failed_count'] = cursor.fetchone()[0]
 
     conn.close()

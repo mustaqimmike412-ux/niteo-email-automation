@@ -1698,10 +1698,10 @@
 
             <!-- ====== SEND ====== -->
             <div class="page" id="page-send">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-                    <div class="card">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+                    <div class="card" style="max-height:calc(100vh - 140px);display:flex;flex-direction:column">
                         <div class="card-head"><h3>✉ 发送控制</h3></div>
-                        <div class="card-body">
+                        <div class="card-body" style="overflow-y:auto;flex:1">
                             <!-- Step 1: 选择国家 -->
                             <div class="form-group">
                                 <label class="form-label">① 选择国家</label>
@@ -1725,16 +1725,16 @@
                                         <button class="btn btn-ghost btn-sm" onclick="toggleEmailGroup('personal')">仅个人</button>
                                         <button class="btn btn-ghost btn-sm" onclick="toggleEmailGroup('public')">仅公共</button>
                                     </div>
-                                    <div id="send-email-list" style="max-height:180px;overflow-y:auto"></div>
+                                    <div id="send-email-list" style="max-height:140px;overflow-y:auto"></div>
                                 </div>
                                 <div id="send-selected-info" style="display:none">
                                     <div class="info-grid" style="margin-bottom:16px">
                                         <div class="info-row"><span class="k">客户</span><span class="v" id="send-cust-name">-</span></div>
                                         <div class="info-row"><span class="k">已选邮箱</span><span class="v" id="send-cust-emails">-</span></div>
                                     </div>
-                                    <!-- 资料选择器 -->
-                                    <div style="margin-bottom:16px;padding:14px;background:var(--bg);border-radius:12px;border:1px solid var(--surface-2)">
-                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                                    <!-- 资料选择器（紧凑） -->
+                                    <div style="margin-bottom:12px;padding:10px;background:var(--bg);border-radius:10px;border:1px solid var(--surface-2)">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                                             <label style="font-size:0.85rem;color:var(--text-2);font-weight:600">📚 关联资料</label>
                                             <span id="material-selector-status" style="font-size:0.78rem;color:var(--text-3)">未选择</span>
                                         </div>
@@ -1758,32 +1758,30 @@
                                         </div>
                                         <div id="send-selected-material-tags" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;min-height:28px"></div>
                                     </div>
-                                    <!-- 字数控制 -->
-                                    <div style="margin-bottom:16px;padding:12px;background:var(--bg);border-radius:10px;border:1px solid var(--surface-2)">
-                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                                            <label style="font-size:0.82rem;color:var(--text-2);font-weight:500">邮件字数控制</label>
-                                            <span id="word-count-display" style="font-size:0.82rem;color:var(--accent);font-weight:600">200 词</span>
+                                    <!-- 字数 & 标题数量（并排） -->
+                                    <div style="margin-bottom:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                                        <div style="padding:10px;background:var(--bg);border-radius:10px;border:1px solid var(--surface-2)">
+                                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                                                <label style="font-size:0.8rem;color:var(--text-2);font-weight:500">邮件字数</label>
+                                                <span id="word-count-display" style="font-size:0.8rem;color:var(--accent);font-weight:600">200 词</span>
+                                            </div>
+                                            <input type="range" id="word-count-target" min="50" max="250" value="200" style="width:100%" oninput="updateWordCountDisplay()">
                                         </div>
-                                        <input type="range" id="word-count-target" min="50" max="250" value="200" style="width:100%" oninput="updateWordCountDisplay()">
-                                        <div style="display:flex;justify-content:space-between;margin-top:4px">
-                                            <span style="font-size:0.72rem;color:var(--text-3)">50 词</span>
-                                            <span style="font-size:0.72rem;color:var(--text-3)">250 词</span>
-                                        </div>
-                                    </div>
-                                    <div style="margin-bottom:16px;padding:12px;background:var(--bg);border-radius:10px;border:1px solid var(--surface-2)">
-                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                                            <label style="font-size:0.82rem;color:var(--text-2);font-weight:500">标题数量（多标题随机分配防垃圾）</label>
-                                            <span id="subject-count-display" style="font-size:0.82rem;color:var(--accent);font-weight:600">自动</span>
-                                        </div>
-                                        <input type="range" id="subject-count-target" min="0" max="10" value="0" style="width:100%" oninput="updateSubjectCountDisplay()">
-                                        <div style="display:flex;justify-content:space-between;margin-top:4px">
-                                            <span style="font-size:0.72rem;color:var(--text-3)">自动</span>
-                                            <span style="font-size:0.72rem;color:var(--text-3)">10 个</span>
+                                        <div style="padding:10px;background:var(--bg);border-radius:10px;border:1px solid var(--surface-2)">
+                                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                                                <label style="font-size:0.8rem;color:var(--text-2);font-weight:500">标题数量</label>
+                                                <span id="subject-count-display" style="font-size:0.8rem;color:var(--accent);font-weight:600">自动</span>
+                                            </div>
+                                            <input type="range" id="subject-count-target" min="0" max="10" value="0" style="width:100%" oninput="updateSubjectCountDisplay()">
                                         </div>
                                     </div>
-                                    <!-- 发送调度设置 -->
+                                    <!-- 发送调度设置（默认折叠） -->
                                     <div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:10px;border:1px solid var(--surface-2)">
-                                        <div style="font-size:0.82rem;color:var(--text-2);font-weight:600;margin-bottom:10px">⏱ 发送调度</div>
+                                        <div style="font-size:0.82rem;color:var(--text-2);font-weight:600;cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('span:last-child').textContent=this.nextElementSibling.style.display==='none'?'+':'−'">
+                                            <span>⏱ 发送调度</span>
+                                            <span style="font-size:1rem;color:var(--text-3)">+</span>
+                                        </div>
+                                        <div id="send-schedule-detail" style="display:none">
                                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                                             <div class="form-group">
                                                 <label class="form-label">发送间隔</label>
@@ -1827,6 +1825,7 @@
                                         <div id="send-eta" style="font-size:0.78rem;color:var(--teal);margin-top:8px;display:none">
                                             预计完成: <span id="send-eta-value" style="font-weight:600">-</span>
                                         </div>
+                                        </div><!-- end send-schedule-detail -->
                                     </div>
                                     <div id="btn-group-initial" style="display:flex;gap:8px">
                                         <button class="btn btn-accent" style="flex:1;justify-content:center;padding:14px" onclick="generateEmailPreview()">✨ 编辑后发送</button>
@@ -1842,9 +1841,9 @@
                             </div>
                         </div>
                     </div>
-                    <div class="card">
+                    <div class="card" style="max-height:calc(100vh - 140px);display:flex;flex-direction:column">
                         <div class="card-head"><h3>📝 邮件预览</h3></div>
-                        <div class="card-body" id="send-preview">
+                        <div class="card-body" id="send-preview" style="overflow-y:auto;flex:1">
                             <div class="empty"><div class="icon">✉</div><div class="title">选择客户后点击"生成邮件预览"</div></div>
                         </div>
                     </div>
@@ -1880,40 +1879,22 @@
 
             <!-- ====== SCHEDULER ====== -->
             <div class="page" id="page-scheduler">
-                <!-- 发送模式选择标签 -->
-                <div class="card" style="margin-bottom:20px">
-                    <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-                        <h3>⏰ 邮件发送中心</h3>
-                    </div>
-                </div>
-
                 <!-- 自动调度模式面板 -->
                 <div id="panel-auto">
-                    <!-- 第一行：状态 + 配置 + 筛选 -->
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:20px">
-                        <!-- 调度器状态 -->
-                        <div class="card">
-                            <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
-                                <h3>调度器状态</h3>
-                                <span class="badge" id="sch-status-badge">⏸ 已停止</span>
-                            </div>
-                            <div class="card-body">
-                                <div id="sch-next-run" style="font-size:0.84rem;color:var(--text-3);margin-bottom:16px"></div>
-                                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                                    <button class="btn btn-accent" onclick="schedulerAction('start')">▶ 启动</button>
-                                    <button class="btn btn-ghost" onclick="schedulerAction('stop')">⏹ 停止</button>
-                                    <button class="btn btn-ghost" onclick="schedulerAction('run-now')">⚡ 立即执行</button>
-                                    <button class="btn btn-ghost" onclick="schedulerPreview()">👁 预览</button>
-                                </div>
-                                <div class="stats-row" style="grid-template-columns:repeat(2,1fr);margin-top:16px">
-                                    <div class="stat-card"><div class="label">今日已发</div><div class="value c-teal" id="sch-today">-</div></div>
-                                    <div class="stat-card"><div class="label">今日上限</div><div class="value c-blue" id="sch-limit-display">-</div></div>
-                                </div>
-                            </div>
-                        </div>
+                    <!-- 调度配置 + 筛选规则 -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;align-items:start">
                         <!-- 调度配置 -->
                         <div class="card">
-                            <div class="card-head"><h3>⚙ 调度配置</h3></div>
+                            <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                                <h3>⏰ 调度配置</h3>
+                                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                                    <span class="badge" id="sch-status-badge">⏸ 已停止</span>
+                                    <button class="btn btn-accent" style="padding:6px 10px;font-size:0.78rem" onclick="schedulerAction('start')">▶ 启动</button>
+                                    <button class="btn btn-ghost" style="padding:6px 10px;font-size:0.78rem" onclick="schedulerAction('stop')">⏹ 停止</button>
+                                    <button class="btn btn-ghost" style="padding:6px 10px;font-size:0.78rem" onclick="schedulerAction('run-now')">⚡ 立即</button>
+                                    <button class="btn btn-ghost" style="padding:6px 10px;font-size:0.78rem" onclick="schedulerPreview()">👁 预览</button>
+                                </div>
+                            </div>
                             <div class="card-body">
                                 <div class="form-group">
                                     <label class="form-label">发送模式</label>
@@ -1964,28 +1945,29 @@
                                         <option value="ai">DeepSeek AI（更智能）</option>
                                     </select>
                                 </div>
-                                <div class="form-group">
-                                    <label class="form-label">邮件字数控制</label>
-                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                                        <span style="font-size:0.72rem;color:var(--text-3)">50 词</span>
-                                        <span id="sch-word-count-display" style="font-size:0.82rem;color:var(--accent);font-weight:600">200 词</span>
-                                        <span style="font-size:0.72rem;color:var(--text-3)">250 词</span>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                                    <div class="form-group" style="margin-bottom:0">
+                                        <label class="form-label">邮件字数</label>
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                                            <span style="font-size:0.72rem;color:var(--text-3)">50</span>
+                                            <span id="sch-word-count-display" style="font-size:0.82rem;color:var(--accent);font-weight:600">200 词</span>
+                                            <span style="font-size:0.72rem;color:var(--text-3)">250</span>
+                                        </div>
+                                        <input type="range" id="sch-word-count" min="50" max="250" value="200" style="width:100%" oninput="document.getElementById('sch-word-count-display').textContent = this.value + ' 词'">
                                     </div>
-                                    <input type="range" id="sch-word-count" min="50" max="250" value="200" style="width:100%" oninput="document.getElementById('sch-word-count-display').textContent = this.value + ' 词'">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">标题数量（多标题随机分配防垃圾）</label>
-                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                                        <span style="font-size:0.72rem;color:var(--text-3)">自动</span>
-                                        <span id="sch-subject-count-display" style="font-size:0.82rem;color:var(--accent);font-weight:600">自动</span>
-                                        <span style="font-size:0.72rem;color:var(--text-3)">10 个</span>
+                                    <div class="form-group" style="margin-bottom:0">
+                                        <label class="form-label">标题数量</label>
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                                            <span style="font-size:0.72rem;color:var(--text-3)">自动</span>
+                                            <span id="sch-subject-count-display" style="font-size:0.82rem;color:var(--accent);font-weight:600">自动</span>
+                                            <span style="font-size:0.72rem;color:var(--text-3)">10</span>
+                                        </div>
+                                        <input type="range" id="sch-subject-count" min="0" max="10" value="0" style="width:100%" oninput="document.getElementById('sch-subject-count-display').textContent = this.value == 0 ? '自动' : this.value + ' 个'">
                                     </div>
-                                    <input type="range" id="sch-subject-count" min="0" max="10" value="0" style="width:100%" oninput="document.getElementById('sch-subject-count-display').textContent = this.value == 0 ? '自动' : this.value + ' 个'">
                                 </div>
-                                <button class="btn btn-accent" style="width:100%;justify-content:center;margin-top:12px" onclick="saveSchedulerConfig()">💾 保存配置</button>
                             </div>
                         </div>
-                        <!-- 自动筛选规则 -->
+                        <!-- 筛选规则 -->
                         <div class="card">
                             <div class="card-head"><h3>🎯 筛选规则</h3></div>
                             <div class="card-body">
@@ -2012,6 +1994,7 @@
                                         <option value="failed">发送失败</option>
                                     </select>
                                 </div>
+                                <button class="btn btn-accent" style="width:100%;justify-content:center;margin-top:8px" onclick="saveSchedulerConfig()">💾 保存配置</button>
                             </div>
                         </div>
                     </div>

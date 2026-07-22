@@ -156,11 +156,11 @@ def _row_to_step(row):
     }
 
 
-def _build_user_where(user_id, admin=False):
+def _build_user_where(user_id):
     """构建 user_id 隔离的 WHERE 子句片段，返回 (clause, params)"""
-    if admin:
-        return '', []
-    return 'user_id = ?', [user_id]
+    if user_id:
+        return 'user_id = ?', [user_id]
+    return '', []
 
 
 # ==================== 序列 CRUD ====================
@@ -203,13 +203,12 @@ def create_sequence(customer_id, user_id, strategy_type='standard', total_steps=
     return sequence_id
 
 
-def get_sequence(sequence_id, user_id=None, admin=False):
+def get_sequence(sequence_id, user_id=None):
     """获取跟进序列详情（含所有步骤）
 
     Args:
         sequence_id: 序列ID
         user_id: 用户ID（用于数据隔离）
-        admin: 是否为管理员（管理员可查看所有数据）
 
     Returns:
         包含 steps 列表的序列字典，或 None
@@ -218,7 +217,7 @@ def get_sequence(sequence_id, user_id=None, admin=False):
     cursor = conn.cursor()
 
     # 查询序列基本信息
-    user_clause, user_params = _build_user_where(user_id, admin)
+    user_clause, user_params = _build_user_where(user_id)
     if user_clause:
         where_sql = f'WHERE id = ? AND {user_clause}'
         params = [sequence_id] + user_params
@@ -255,7 +254,7 @@ def get_sequence(sequence_id, user_id=None, admin=False):
     return sequence
 
 
-def list_sequences(user_id, status=None, customer_id=None, page=1, per_page=20, admin=False):
+def list_sequences(user_id, status=None, customer_id=None, page=1, per_page=20):
     """获取跟进序列列表（分页）
 
     Args:
@@ -264,7 +263,6 @@ def list_sequences(user_id, status=None, customer_id=None, page=1, per_page=20, 
         customer_id: 按客户筛选
         page: 页码
         per_page: 每页数量
-        admin: 是否为管理员
 
     Returns:
         {'items': [...], 'total': int}
@@ -276,7 +274,7 @@ def list_sequences(user_id, status=None, customer_id=None, page=1, per_page=20, 
     params = []
 
     # user_id 隔离
-    if not admin and user_id:
+    if user_id:
         where_clauses.append('user_id = ?')
         params.append(user_id)
 
@@ -312,13 +310,12 @@ def list_sequences(user_id, status=None, customer_id=None, page=1, per_page=20, 
     return {'items': items, 'total': total}
 
 
-def update_sequence(sequence_id, user_id, admin=False, **kwargs):
+def update_sequence(sequence_id, user_id, **kwargs):
     """更新跟进序列
 
     Args:
         sequence_id: 序列ID
         user_id: 用户ID
-        admin: 是否为管理员
         **kwargs: 可更新的字段 (config_json, status, generation_context 等)
 
     Returns:
@@ -328,7 +325,7 @@ def update_sequence(sequence_id, user_id, admin=False, **kwargs):
     cursor = conn.cursor()
 
     # 先验证序列存在且属于该用户
-    user_clause, user_params = _build_user_where(user_id, admin)
+    user_clause, user_params = _build_user_where(user_id)
     if user_clause:
         check_sql = f'SELECT id FROM follow_up_sequences WHERE id = ? AND {user_clause}'
         check_params = [sequence_id] + user_params
@@ -524,21 +521,20 @@ def activate_sequence(sequence_id, user_id, admin=False):
     return True, None
 
 
-def pause_sequence(sequence_id, user_id, admin=False):
-    """暂停跟进序列
+def delete_sequence(sequence_id, user_id):
+    """删除跟进序列
 
     Args:
         sequence_id: 序列ID
         user_id: 用户ID
-        admin: 是否为管理员
 
     Returns:
-        (success: bool, error: str or None)
+        (success, error_message)
     """
     conn = get_connection()
     cursor = conn.cursor()
 
-    user_clause, user_params = _build_user_where(user_id, admin)
+    user_clause, user_params = _build_user_where(user_id)
     if user_clause:
         check_sql = f'SELECT status FROM follow_up_sequences WHERE id = ? AND {user_clause}'
         check_params = [sequence_id] + user_params
@@ -630,13 +626,12 @@ def resume_sequence(sequence_id, user_id, admin=False):
     return True, None
 
 
-def cancel_sequence(sequence_id, user_id, admin=False):
+def cancel_sequence(sequence_id, user_id):
     """取消跟进序列
 
     Args:
         sequence_id: 序列ID
         user_id: 用户ID
-        admin: 是否为管理员
 
     Returns:
         (success: bool, error: str or None)
@@ -644,7 +639,7 @@ def cancel_sequence(sequence_id, user_id, admin=False):
     conn = get_connection()
     cursor = conn.cursor()
 
-    user_clause, user_params = _build_user_where(user_id, admin)
+    user_clause, user_params = _build_user_where(user_id)
     if user_clause:
         check_sql = f'SELECT status FROM follow_up_sequences WHERE id = ? AND {user_clause}'
         check_params = [sequence_id] + user_params
@@ -697,7 +692,7 @@ def get_step(step_id, user_id=None, admin=False):
     conn = get_connection()
     cursor = conn.cursor()
 
-    if not admin and user_id:
+    if user_id:
         cursor.execute('''
             SELECT s.id, s.sequence_id, s.step_number, s.purpose, s.strategy, s.subject_mode,
                    s.interval_days, s.subject, s.body, s.greeting, s.signature, s.status,
@@ -738,7 +733,7 @@ def update_step(step_id, user_id, admin=False, **kwargs):
     cursor = conn.cursor()
 
     # 先验证步骤存在且属于该用户
-    if not admin and user_id:
+    if user_id:
         cursor.execute('''
             SELECT s.id FROM follow_up_steps s
             JOIN follow_up_sequences seq ON s.sequence_id = seq.id
@@ -801,7 +796,7 @@ def approve_step(step_id, user_id, admin=False):
     cursor = conn.cursor()
 
     # 验证步骤存在且属于该用户
-    if not admin and user_id:
+    if user_id:
         cursor.execute('''
             SELECT s.status, seq.status
             FROM follow_up_steps s
@@ -839,13 +834,12 @@ def approve_step(step_id, user_id, admin=False):
     return True, None
 
 
-def skip_step(step_id, user_id, admin=False):
+def skip_step(step_id, user_id):
     """跳过跟进步骤，状态变为 skipped，并更新序列的 current_step
 
     Args:
         step_id: 步骤ID
         user_id: 用户ID
-        admin: 是否为管理员
 
     Returns:
         (success: bool, error: str or None)
@@ -854,7 +848,7 @@ def skip_step(step_id, user_id, admin=False):
     cursor = conn.cursor()
 
     # 验证步骤存在且属于该用户
-    if not admin and user_id:
+    if user_id:
         cursor.execute('''
             SELECT s.status, s.sequence_id, s.step_number, seq.current_step
             FROM follow_up_steps s
@@ -899,15 +893,14 @@ def skip_step(step_id, user_id, admin=False):
     return True, None
 
 
-def get_due_steps(user_id=None, admin=False):
+def get_due_steps(user_id=None):
     """获取到期待发送的跟进步骤
 
     返回 status='approved' AND scheduled_at <= now 的步骤列表，
     并附加序列信息和客户信息。
 
     Args:
-        user_id: 用户ID（为 None 且 admin=True 时查所有）
-        admin: 是否为管理员
+        user_id: 用户ID
 
     Returns:
         步骤字典列表
@@ -917,7 +910,7 @@ def get_due_steps(user_id=None, admin=False):
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    if not admin and user_id:
+    if user_id:
         cursor.execute('''
             SELECT s.id, s.sequence_id, s.step_number, s.purpose, s.strategy, s.subject_mode,
                    s.interval_days, s.subject, s.body, s.greeting, s.signature, s.status,
@@ -1064,12 +1057,11 @@ def mark_step_failed(step_id, error_message):
 
 # ==================== 统计与查询 ====================
 
-def get_follow_up_dashboard(user_id, admin=False):
+def get_follow_up_dashboard(user_id):
     """获取跟进邮件仪表盘统计
 
     Args:
         user_id: 用户ID
-        admin: 是否为管理员
 
     Returns:
         dict: {
@@ -1082,7 +1074,7 @@ def get_follow_up_dashboard(user_id, admin=False):
     conn = get_connection()
     cursor = conn.cursor()
 
-    user_clause, user_params = _build_user_where(user_id, admin)
+    user_clause, user_params = _build_user_where(user_id)
     user_where = f'AND {user_clause}' if user_clause else ''
 
     # 活跃序列数
@@ -1129,13 +1121,12 @@ def get_follow_up_dashboard(user_id, admin=False):
     }
 
 
-def get_customer_follow_status(customer_id, user_id, admin=False):
+def get_customer_follow_status(customer_id, user_id):
     """获取客户的跟进状态
 
     Args:
         customer_id: 客户ID
         user_id: 用户ID
-        admin: 是否为管理员
 
     Returns:
         dict: {
@@ -1149,7 +1140,7 @@ def get_customer_follow_status(customer_id, user_id, admin=False):
     conn = get_connection()
     cursor = conn.cursor()
 
-    user_clause, user_params = _build_user_where(user_id, admin)
+    user_clause, user_params = _build_user_where(user_id)
     user_where = f'AND {user_clause}' if user_clause else ''
 
     cursor.execute(f'''

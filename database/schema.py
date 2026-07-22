@@ -574,11 +574,33 @@ def init_database():
     _add_column_safe(cursor, 'api_configs', 'user_id', 'INTEGER')
     _add_column_safe(cursor, 'bounce_logs', 'user_id', 'INTEGER')
 
+    # ==================== 修复 api_configs UNIQUE 约束：从 api_name 改为 (api_name, user_id) ====================
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='api_configs' AND sql LIKE '%UNIQUE%' AND sql LIKE '%api_name%' AND sql NOT LIKE '%user_id%'")
+    old_unique_indexes = [r[0] for r in cursor.fetchall()]
+    for idx_name in old_unique_indexes:
+        try:
+            cursor.execute(f'DROP INDEX IF EXISTS {idx_name}')
+            print(f"[Schema] 已删除旧 UNIQUE 索引: {idx_name}")
+        except Exception:
+            pass
+    # 创建新的组合唯一索引（如果还不存在）
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='api_configs' AND sql LIKE '%api_name%' AND sql LIKE '%user_id%'")
+    if not cursor.fetchone():
+        try:
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_api_configs_name_user ON api_configs(api_name, user_id)')
+            print("[Schema] 已创建组合唯一索引: (api_name, user_id)")
+        except Exception as e:
+            print(f"[Schema] 创建组合索引失败（可能已有重复数据）: {e}")
+    conn.commit()
+
     # ==================== 退信追踪：为 emails 表添加退信相关字段 ====================
     _add_column_safe(cursor, 'emails', 'bounce_status', "TEXT CHECK(bounce_status IN ('none', 'soft', 'hard')) DEFAULT 'none'")
     _add_column_safe(cursor, 'emails', 'bounce_count', 'INTEGER DEFAULT 0')
     _add_column_safe(cursor, 'emails', 'last_bounce_at', 'INTEGER')
     _add_column_safe(cursor, 'emails', 'bounce_reason', 'TEXT')
+
+    # ==================== 退信追踪：为 email_logs 表添加 recipient_email 字段 ====================
+    _add_column_safe(cursor, 'email_logs', 'recipient_email', 'TEXT')
 
     # ==================== 数据隔离：为 search_platform_configs 添加 user_id ====================
     _add_column_safe(cursor, 'search_platform_configs', 'user_id', 'INTEGER')
@@ -598,7 +620,7 @@ def init_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS api_configs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            api_name TEXT NOT NULL UNIQUE,
+            api_name TEXT NOT NULL,
             api_key TEXT NOT NULL,
             base_url TEXT,
             model TEXT,
@@ -773,12 +795,28 @@ def init_database():
         )
     ''')
 
+    # 跟进调度表（用于批量删除时清理关联数据）
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS follow_up_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL,
+            user_id INTEGER,
+            sequence_id INTEGER,
+            scheduled_at TIMESTAMP,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (customer_id) REFERENCES customers(id),
+            FOREIGN KEY (sequence_id) REFERENCES follow_up_sequences(id)
+        )
+    ''')
+
     # 跟进模块索引
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_sequences_customer ON follow_up_sequences(customer_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_sequences_user ON follow_up_sequences(user_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_sequences_status ON follow_up_sequences(user_id, status)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_steps_sequence ON follow_up_steps(sequence_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_steps_status ON follow_up_steps(status, scheduled_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_follow_up_schedules_customer ON follow_up_schedules(customer_id)')
 
     # email_logs 新增跟进相关字段
     try:

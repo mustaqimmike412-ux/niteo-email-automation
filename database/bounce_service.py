@@ -118,14 +118,14 @@ def update_email_log_bounce(recipient_email: str, bounce_type: str,
         conn.close()
 
 
-def get_bounce_stats(user_id: int = None, admin: bool = False) -> dict:
+def get_bounce_stats(user_id: int = None) -> dict:
     """获取退信统计"""
     conn = get_connection()
     cursor = conn.cursor()
     try:
         user_where = ""
         user_params = []
-        if not admin and user_id:
+        if user_id:
             user_where = " AND user_id = ?"
             user_params = [user_id]
 
@@ -148,7 +148,7 @@ def get_bounce_stats(user_id: int = None, admin: bool = False) -> dict:
         # 退信率
         sent_where = ""
         sent_params = []
-        if not admin and user_id:
+        if user_id:
             sent_where = " AND user_id = ?"
             sent_params = [user_id]
         cursor.execute(f"SELECT COUNT(*) FROM email_logs WHERE send_status = 'sent'{sent_where}", sent_params)
@@ -193,7 +193,7 @@ def get_bounce_stats(user_id: int = None, admin: bool = False) -> dict:
                 'top_reasons': [], 'top_domains': []}
 
 
-def get_bounce_list(page: int = 1, per_page: int = 20, bounce_type: str = '', user_id: int = None, admin: bool = False) -> dict:
+def get_bounce_list(page: int = 1, per_page: int = 20, bounce_type: str = '', user_id: int = None) -> dict:
     """获取退信列表"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -203,7 +203,7 @@ def get_bounce_list(page: int = 1, per_page: int = 20, bounce_type: str = '', us
         if bounce_type:
             where_clauses.append('bounce_type = ?')
             params.append(bounce_type)
-        if not admin and user_id:
+        if user_id:
             where_clauses.append('(b.user_id = ? OR b.user_id IS NULL)')
             params.append(user_id)
 
