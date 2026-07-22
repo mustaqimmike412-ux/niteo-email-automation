@@ -259,8 +259,17 @@ class SmartSubjectManager:
             pool.extend([i] * count)
 
         # 去重洗牌：保证相邻元素不重复
-        # 算法：多次随机尝试，若某次洗牌无相邻重复则采用；超过上限则用贪心修正
         assignment_plan = self._shuffle_no_adjacent(pool, subjects)
+
+        # 最终兜底：如果洗牌后仍有相邻重复，强制修正
+        for i in range(1, len(assignment_plan)):
+            if assignment_plan[i] == assignment_plan[i - 1]:
+                # 找一个与前后都不重复的索引来交换
+                for j in range(len(assignment_plan)):
+                    if assignment_plan[j] != assignment_plan[i - 1]:
+                        if i + 1 >= len(assignment_plan) or assignment_plan[j] != assignment_plan[i + 1]:
+                            assignment_plan[i], assignment_plan[j] = assignment_plan[j], assignment_plan[i]
+                            break
 
         # 分配标题
         result = []
@@ -316,7 +325,7 @@ class SmartSubjectManager:
 
         策略：
         1. 如果标题数 >= 2，先尝试随机洗牌（最多100次），若无相邻重复则直接采用
-        2. 若100次都没成功，用贪心算法逐位随机选择与上一个不同的标题
+        2. 若100次都没成功，用贪心算法（优先选剩余最多的候选，避免死锁）
         3. 如果只有1个标题，无法避免重复，退回简单打乱
         """
         if len(subjects) <= 1:
@@ -330,7 +339,7 @@ class SmartSubjectManager:
             if all(candidate[i] != candidate[i + 1] for i in range(len(candidate) - 1)):
                 return candidate
 
-        # 阶段2：贪心构建
+        # 阶段2：贪心构建（优先选剩余最多的候选，避免死锁）
         # 统计每个标题的剩余可用次数
         remaining = {}
         for idx in set(pool):
@@ -345,7 +354,9 @@ class SmartSubjectManager:
             if not candidates:
                 # 极端情况：只剩一种标题了，只能用它
                 candidates = [idx for idx, cnt in remaining.items() if cnt > 0]
-            chosen = random.choice(candidates)
+            # 关键修复：选剩余数量最多的候选，避免低频元素被过早耗尽导致死锁
+            candidates.sort(key=lambda x: remaining[x], reverse=True)
+            chosen = candidates[0]
             result.append(chosen)
             remaining[chosen] -= 1
             last_idx = chosen
