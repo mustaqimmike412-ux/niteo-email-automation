@@ -131,7 +131,9 @@ class SmartSubjectManager:
 
     def calculate_subject_count(self, email_count: int, user_override: int = 0) -> int:
         """
-        根据邮箱数量计算需要生成的标题数量
+        计算需要生成的标题数量。
+        用户指定数量时优先使用用户设置（上限20），不再限制为邮箱数量，
+        让用户能在预览区看到所有设定的标题。
 
         Args:
             email_count: 邮箱数量
@@ -141,7 +143,7 @@ class SmartSubjectManager:
             int: 需要生成的标题数量
         """
         if user_override > 0:
-            return min(max(1, user_override), min(email_count, 20))
+            return min(max(1, user_override), 20)
         if email_count <= 4:
             return 2
         elif email_count <= 10:
@@ -437,16 +439,24 @@ class SmartSubjectManager:
                 if v and v not in subjects and len(subjects) < 15:
                     subjects.append(v)
 
-        # 如果基于内容生成的太少，从正文中提取关键句作为补充
+        # 如果基于内容生成的太少，从正文中提取关键句作为补充（仅提取含核心卖点的句子）
         if len(subjects) < 3:
+            keyword_hints = ['efficiency', 'power', 'solar panel', 'panel', 'warranty', 'delivery',
+                             'custom', 'oem', 'sample', 'cost', 'save', 'quality', 'durability',
+                             'technology', 'solution', 'manufacturing', 'ship', 'export']
+            skip_prefixes = ['hi ', 'hello ', 'dear ', 'best regards', 'sincerely', 'thank you',
+                             'my name is', 'i am ', 'i noticed', 'i hope', 'we are ', 'our company']
             sentences = re.split(r'(?<=[.!?])\s+', email_body)
             for sentence in sentences:
                 sentence = sentence.strip()
-                if len(sentence) < 25 or len(sentence) > 100:
+                if len(sentence) < 30 or len(sentence) > 90:
                     continue
-                # 跳过问候语和结尾
                 lower = sentence.lower()
-                if any(x in lower for x in ['hi ', 'hello ', 'dear ', 'best regards', 'sincerely', 'thank you']):
+                # 跳过问候语、自我介绍和结尾
+                if any(x in lower for x in skip_prefixes):
+                    continue
+                # 只保留包含核心卖点关键词的句子
+                if not any(h in lower for h in keyword_hints):
                     continue
                 title = sentence[0].upper() + sentence[1:]
                 title = self._validate_and_clean(title)
@@ -521,7 +531,7 @@ class SmartSubjectManager:
         return themes
 
     def _create_subject_variations(self, theme: str, customer_name: str) -> List[str]:
-        """为一个主题创建多种句式的标题变体"""
+        """为一个主题创建多种句式的标题变体，确保多样化"""
         variations = []
 
         # 句式1: 直接陈述
@@ -540,6 +550,12 @@ class SmartSubjectManager:
         # 句式5: 合作视角
         variations.append(f"{theme}: A Partnership with {customer_name}")
 
+        # 句式6: 行动号召
+        variations.append(f"Explore {theme} with {customer_name}")
+
+        # 句式7: 价值主张
+        variations.append(f"{customer_name} + {theme}: A Perfect Match")
+
         # 去重和清理
         result = []
         for v in variations:
@@ -547,7 +563,7 @@ class SmartSubjectManager:
             if v and v not in result:
                 result.append(v)
 
-        return result[:3]  # 每个主题最多3个变体
+        return result[:4]  # 每个主题最多4个变体
 
     def get_pool_stats(self, customer_id: int) -> Optional[Dict]:
         """获取标题池统计信息"""

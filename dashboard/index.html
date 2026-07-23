@@ -7200,7 +7200,7 @@
             if (preview) {
                 currentEmailSubject = preview.subject || '';
                 currentEmailBody = preview.body || '';
-                showEmailEditor(currentEmailSubject, currentEmailBody);
+                showEmailEditor(currentEmailSubject, currentEmailBody, preview.subjects || []);
                 toast('邮件内容已生成，请检查并编辑', 'info');
             }
             return true;
@@ -7289,18 +7289,37 @@
         btn.textContent = '📝 邮件排版';
     }
 
-    function showEmailEditor(subject, body) {
+    function showEmailEditor(subject, body, subjects = []) {
         // 隐藏初始按钮组，显示发送、重新生成、润色和排版按钮
         document.getElementById('btn-group-initial').style.display = 'none';
         document.getElementById('btn-send-email').style.display = 'block';
         document.getElementById('btn-regenerate').style.display = 'block';
         document.getElementById('btn-group-post-gen').style.display = 'flex';
 
+        // 构建标题池显示HTML
+        let subjectsHtml = '';
+        if (subjects && subjects.length > 1) {
+            subjectsHtml = `
+                <div style="margin-bottom:12px">
+                    <label style="font-size:0.78rem;color:var(--text-3);margin-bottom:6px;display:block">邮件主题池（共 ${subjects.length} 个，发送时将随机分配给不同邮箱）</label>
+                    <div style="display:flex;flex-direction:column;gap:6px">
+                        ${subjects.map((s, idx) => `
+                            <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg);border:1px solid var(--surface-2);border-radius:8px">
+                                <span style="font-size:0.75rem;color:var(--accent);font-weight:600;min-width:28px">#${idx + 1}</span>
+                                <span style="font-size:0.85rem;color:var(--text);flex:1">${esc(s)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
         // 显示可编辑的预览区域
         document.getElementById('send-preview').innerHTML = `
             <div style="display:flex;flex-direction:column;gap:12px">
+                ${subjectsHtml}
                 <div>
-                    <label style="font-size:0.78rem;color:var(--text-3);margin-bottom:4px;display:block">邮件主题</label>
+                    <label style="font-size:0.78rem;color:var(--text-3);margin-bottom:4px;display:block">邮件主题（主标题）</label>
                     <input type="text" id="edit-email-subject" value="${esc(subject)}" style="width:100%;padding:10px 12px;border:1px solid var(--surface-2);border-radius:8px;background:var(--bg);color:var(--text);font-size:0.9rem">
                 </div>
                 <div>
@@ -7540,12 +7559,13 @@
             badge.textContent = '⏸ 已停止';
         }
 
-        // 下次执行时间
-        document.getElementById('sch-next-run').textContent = data.next_run ? '下次执行: ' + data.next_run : '';
-
-        // 统计
-        document.getElementById('sch-today').textContent = data.today_sent;
-        document.getElementById('sch-limit-display').textContent = data.daily_limit;
+        // 下次执行时间 & 统计（元素可能不存在，做空值保护）
+        const elNextRun = document.getElementById('sch-next-run');
+        if (elNextRun) elNextRun.textContent = data.next_run ? '下次执行: ' + data.next_run : '';
+        const elToday = document.getElementById('sch-today');
+        if (elToday) elToday.textContent = data.today_sent;
+        const elLimitDisplay = document.getElementById('sch-limit-display');
+        if (elLimitDisplay) elLimitDisplay.textContent = data.daily_limit;
 
         // 加载配置到表单
         document.getElementById('sch-mode').value = data.config.mode || 'interval';

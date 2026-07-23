@@ -848,11 +848,12 @@ def api_customer_delete(customer_id):
         customer_name = row[1]
 
         # 手动清理关联数据（保留email_logs以维持冷却期记录）
-        cursor.execute("DELETE FROM bounce_logs WHERE customer_id = ?", (customer_id,))
-        cursor.execute("DELETE FROM follow_up_schedules WHERE customer_id = ?", (customer_id,))
-        cursor.execute("DELETE FROM customer_subjects WHERE customer_id = ?", (customer_id,))
-        cursor.execute("DELETE FROM contacts WHERE customer_id = ?", (customer_id,))
-        cursor.execute("DELETE FROM emails WHERE customer_id = ?", (customer_id,))
+        # 逐表清理，忽略表不存在的错误（兼容服务器未迁移的情况）
+        for table in ['bounce_logs', 'follow_up_schedules', 'customer_subjects', 'contacts', 'emails']:
+            try:
+                cursor.execute(f"DELETE FROM {table} WHERE customer_id = ?", (customer_id,))
+            except Exception:
+                pass
         conn.commit()
         conn.close()
 
@@ -912,11 +913,13 @@ def api_customers_batch_delete():
         id_placeholders = ','.join('?' * len(valid_ids))
 
         # 手动清理关联数据（保留email_logs）
-        cursor.execute(f"DELETE FROM bounce_logs WHERE customer_id IN ({id_placeholders})", valid_ids)
-        cursor.execute(f"DELETE FROM follow_up_schedules WHERE customer_id IN ({id_placeholders})", valid_ids)
-        cursor.execute(f"DELETE FROM customer_subjects WHERE customer_id IN ({id_placeholders})", valid_ids)
-        cursor.execute(f"DELETE FROM contacts WHERE customer_id IN ({id_placeholders})", valid_ids)
-        cursor.execute(f"DELETE FROM emails WHERE customer_id IN ({id_placeholders})", valid_ids)
+        # 逐表清理，忽略表不存在的错误（兼容服务器未迁移的情况）
+        # 注意: f-string 仅用于生成占位符 ?,?,?，实际参数通过 execute() 传递，安全
+        for table in ['bounce_logs', 'follow_up_schedules', 'customer_subjects', 'contacts', 'emails']:
+            try:
+                cursor.execute(f"DELETE FROM {table} WHERE customer_id IN ({id_placeholders})", valid_ids)
+            except Exception:
+                pass
         conn.commit()
         conn.close()
 
@@ -3193,6 +3196,7 @@ def api_send_test():
         selected_material_ids = data.get('selected_material_ids')
         sender_material_id = data.get('sender_material_id')
         language = data.get('language', 'en')  # 邮件语言，默认英语
+        num_subjects = data.get('num_subjects', 0)  # 标题数量（0=自动）
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
@@ -3237,6 +3241,7 @@ def api_send_test():
                 'selected_material_ids': selected_material_ids,
                 'sender_material_id': sender_material_id,
                 'language': language,
+                'num_subjects': num_subjects,
                 'send_config': send_config,
                 'created_at': time.time()
             }
@@ -3304,9 +3309,9 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
 
         # 获取客户信息（带user_id验证，与主线程权限逻辑一致）
         if user_id:
-            cursor.execute('SELECT customer_name, website FROM customers WHERE id = ? AND user_id = ?', (customer_id, user_id))
+            cursor.execute('SELECT customer_name, website, country FROM customers WHERE id = ? AND user_id = ?', (customer_id, user_id))
         else:
-            cursor.execute('SELECT customer_name, website FROM customers WHERE id = ?', (customer_id,))
+            cursor.execute('SELECT customer_name, website, country FROM customers WHERE id = ?', (customer_id,))
         row = cursor.fetchone()
         if not row:
             task['status'] = 'failed'
@@ -3314,7 +3319,7 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
             conn.close()
             return
 
-        customer_name, website = row
+        customer_name, website, country = row
 
         persist_send_task_meta(task_id, 'manual', 'running',
                                customer_id=customer_id, customer_name=customer_name,
@@ -3860,6 +3865,7 @@ def api_email_preview():
                 'selected_material_ids': selected_material_ids,
                 'sender_material_id': sender_material_id,
                 'language': language,
+                'num_subjects': data.get('num_subjects', 0),
                 'created_at': time.time()
             }
 
@@ -3891,9 +3897,9 @@ def _do_generate_preview(task_id, customer_id, user_id=None, language='en'):
 
         # 获取客户信息（带user_id验证，与主线程权限逻辑一致）
         if user_id:
-            cursor.execute('SELECT customer_name, website FROM customers WHERE id = ? AND user_id = ?', (customer_id, user_id))
+            cursor.execute('SELECT customer_name, website, country FROM customers WHERE id = ? AND user_id = ?', (customer_id, user_id))
         else:
-            cursor.execute('SELECT customer_name, website FROM customers WHERE id = ?', (customer_id,))
+            cursor.execute('SELECT customer_name, website, country FROM customers WHERE id = ?', (customer_id,))
         row = cursor.fetchone()
         if not row:
             task['status'] = 'failed'
@@ -3901,7 +3907,7 @@ def _do_generate_preview(task_id, customer_id, user_id=None, language='en'):
             conn.close()
             return
 
-        customer_name, website = row
+        customer_name, website, country = row
 
         # 获取 sender_material_id：优先用 task 中已有的，否则从 selected_material_ids 中找 sender_info/personal_info
         sender_material_id = task.get('sender_material_id')
@@ -3936,13 +3942,28 @@ def _do_generate_preview(task_id, customer_id, user_id=None, language='en'):
             language=language
         )
 
+        # 生成标题池（让用户在预览区看到所有将使用的标题）
+        num_subjects = task.get('num_subjects', 0)
+        from generators.subjects.manager import subject_manager
+        preview_body = email_content.get('full_text', email_content['body'])
+        # 用足够大的 email_count 确保生成用户指定的标题数量
+        subject_pool = subject_manager.generate_subjects(
+            customer_name=customer_name,
+            country=country or '',
+            industry='',
+            email_count=20,  # 传大值，让用户设置决定实际数量
+            email_body=preview_body,
+            user_override=num_subjects
+        )
+
         # 保存邮件预览（full_text 包含问候语+正文+签名）
         task['email_preview'] = {
             'subject': email_content['subject'],
-            'body': email_content.get('full_text', email_content['body']),
+            'body': preview_body,
             'html': email_content.get('html', ''),
             'word_count': email_content.get('word_count', 0),
-            'customer_name': customer_name
+            'customer_name': customer_name,
+            'subjects': subject_pool  # 新增：标题池列表
         }
 
         # 标记生成完成（但不标记 send 步骤）
