@@ -562,12 +562,21 @@ def _task_row_to_dict(row) -> dict:
 
 def _result_row_to_dict(row) -> dict:
     """将search_results行转换为字典"""
+    def _safe_json(val, default):
+        """安全解析JSON，解析失败返回默认值"""
+        if not val:
+            return default
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return default
+
     return {
         'id': row[0],
         'task_id': row[1],
         'platform': row[2],
         'source_url': row[3],
-        'raw_data_json': json.loads(row[4]) if row[4] else {},
+        'raw_data_json': _safe_json(row[4], {}),
         'company_name': row[5],
         'website': row[6],
         'country': row[7],
@@ -577,14 +586,14 @@ def _result_row_to_dict(row) -> dict:
         'industry_type': row[11],
         'business_model': row[12],
         'confidence_score': row[13],
-        'ai_analysis_json': json.loads(row[14]) if row[14] else {},
+        'ai_analysis_json': _safe_json(row[14], {}),
         'import_status': row[15],
         'imported_customer_id': row[16],
         'search_keyword': row[17],
         'search_location': row[18],
         'created_at': row[19],
         'updated_at': row[20],
-        'emails_json': json.loads(row[21]) if row[21] else [],
+        'emails_json': _safe_json(row[21], []),
         'validation_status': row[22] or 'pending',
         'validation_reason': row[23] or '',
         'pre_crawl_score': row[24],

@@ -259,7 +259,7 @@ Generate FABE for each advantage."""
 
     def compose_email(self, research_result, classification, fabe_points, materials,
                        contact_name=None, email_type='public', has_website=True, company_info=None,
-                       target_word_count=None, language='en'):
+                       target_word_count=None, language='en', opening_template=None):
         """
         基于全部管线上下文生成完整开发信。
 
@@ -436,6 +436,29 @@ CONTENT RULES:
 ---
 EMAIL GUIDELINES (MUST FOLLOW — these override any conflicting instructions above):
 {guidelines_text}"""
+
+        # 如果用户配置了开场白模板，注入到 prompt 中
+        if opening_template:
+            # 替换 Section 1 — OPENING 的指令，让 LLM 基于用户模板生成
+            opening_override = f"""   Section 1 — OPENING (1-2 sentences):
+   Use the following opening template as the base for this section. Adapt it naturally to the recipient's specific business context, mentioning their company name and at least one of their core products:
+   "{opening_template}"
+   The opening MUST start with the core message of this template. Do NOT deviate from the template's core idea — only adapt the wording to fit naturally."""
+            # 找到并替换原有的 Section 1 — OPENING 段落
+            original_section = """   Section 1 — OPENING (1-2 sentences):
+   Show you understand THEIR business. Mention their company name AND at least one of their core products.
+   Vary your opener — do NOT always start with "I noticed". Use diverse phrasing such as:
+   - "Having followed [Company]'s expansion into..."
+   - "It's great to see how [Company] has been..."
+   - "With [Company]'s focus on..."
+   - "I came across [Company]'s work in..."
+   - "[Company]'s commitment to [specific area] caught my attention."
+   NEVER repeat the same opening pattern. Make each email feel unique."""
+            if original_section in system_prompt:
+                system_prompt = system_prompt.replace(original_section, opening_override)
+            else:
+                # 如果精确匹配失败，尝试在 Section 1 后追加提示
+                system_prompt += f"\n\n   ADDITIONAL OPENING TEMPLATE (MUST USE):\n   Base your Section 1 — OPENING on this template: \"{opening_template}\"\n"
 
         # 补充更多客户背调信息
         products_info = research_result.get('module2_products', {})

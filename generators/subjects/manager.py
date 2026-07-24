@@ -186,7 +186,7 @@ class SmartSubjectManager:
 
         subjects = []
 
-        # 第一步：优先基于邮件正文生成内容相关标题
+        # 第一步：优先基于邮件正文生成内容相关标题（优先使用 DeepSeek LLM）
         if email_body and len(email_body) > 20:
             content_subjects = self._generate_subjects_from_body(email_body, clean_name)
             for cs in content_subjects:
@@ -195,7 +195,7 @@ class SmartSubjectManager:
                 if len(subjects) >= subject_count:
                     break
 
-        # 第二步：如果内容标题不够，用模板补充
+        # 第二步：如果内容标题不够（LLM不可用+正则也提取不够），用模板补充
         if len(subjects) < subject_count:
             templates_needed = min(subject_count - len(subjects), len(self.TEMPLATES))
             selected_templates = random.sample(self.TEMPLATES, templates_needed)
@@ -288,7 +288,8 @@ class SmartSubjectManager:
                             country: str, industry: str,
                             email_items: List[Dict],
                             email_body: str = None,
-                            num_subjects: int = 0) -> Tuple[List[str], List[Dict]]:
+                            num_subjects: int = 0,
+                            subjects: List[str] = None) -> Tuple[List[str], List[Dict]]:
         """
         一站式生成标题并分配给邮箱
 
@@ -300,14 +301,16 @@ class SmartSubjectManager:
             email_items: 邮箱列表
             email_body: 邮件正文（用于生成基于内容的标题）
             num_subjects: 用户指定的标题数量（0 = 自动决定）
+            subjects: 预先生成的标题列表（如预览阶段已生成）。传入时直接使用，不再重新生成
 
         Returns:
             Tuple[List[str], List[Dict]]: (生成的标题列表, 分配后的邮箱列表)
         """
-        subjects = self.generate_subjects(customer_name, country, industry,
-                                          len(email_items),
-                                          email_body=email_body,
-                                          user_override=num_subjects)
+        if subjects is None:
+            subjects = self.generate_subjects(customer_name, country, industry,
+                                              len(email_items),
+                                              email_body=email_body,
+                                              user_override=num_subjects)
         assigned_items = self.assign_subjects_to_emails(
             customer_id, customer_name, email_items, subjects
         )
@@ -417,29 +420,27 @@ class SmartSubjectManager:
     def _generate_subjects_from_body(self, email_body: str, customer_name: str) -> List[str]:
         """
         从邮件正文提取核心卖点，生成基于内容的多样化标题。
-        标题完全基于邮件实际内容，而非固定模板。
+        优先使用 DeepSeek LLM 提取核心卖点，LLM 不可用时回退到正则提取。
         """
-        import re
-        subjects = []
         clean_name = self._clean_customer_name(customer_name)
 
-        # 提取正文的核心主题（段落级）
-        paragraphs = [p.strip() for p in email_body.split('\n\n') if len(p.strip()) > 30]
-        if not paragraphs:
-            paragraphs = [email_body]
+        # 第一步：用 DeepSeek LLM 从邮件正文提取核心卖点并直接生成标题
+        llm_subjects = self._extract_themes_with_llm(email_body, clean_name)
+        if llm_subjects and len(llm_subjects) >= 3:
+            return llm_subjects
 
-        # 提取关键短语和卖点
-        themes = self._extract_themes(email_body)
+        # 第二步：LLM 失败时回退到正则提取
+        import re
+        subjects = []
+        themes = self._extract_themes_fallback(email_body)
 
-        # 基于主题生成多种句式的标题
-        for theme in themes[:5]:  # 最多5个主题
-            # 为每个主题生成2-3种不同句式的变体
+        for theme in themes[:5]:
             variations = self._create_subject_variations(theme, clean_name)
             for v in variations:
                 if v and v not in subjects and len(subjects) < 15:
                     subjects.append(v)
 
-        # 如果基于内容生成的太少，从正文中提取关键句作为补充（仅提取含核心卖点的句子）
+        # 如果正则提取也太少，从正文中提取关键句
         if len(subjects) < 3:
             keyword_hints = ['efficiency', 'power', 'solar panel', 'panel', 'warranty', 'delivery',
                              'custom', 'oem', 'sample', 'cost', 'save', 'quality', 'durability',
@@ -452,10 +453,8 @@ class SmartSubjectManager:
                 if len(sentence) < 30 or len(sentence) > 90:
                     continue
                 lower = sentence.lower()
-                # 跳过问候语、自我介绍和结尾
                 if any(x in lower for x in skip_prefixes):
                     continue
-                # 只保留包含核心卖点关键词的句子
                 if not any(h in lower for h in keyword_hints):
                     continue
                 title = sentence[0].upper() + sentence[1:]
@@ -465,8 +464,82 @@ class SmartSubjectManager:
 
         return subjects
 
-    def _extract_themes(self, email_body: str) -> List[str]:
-        """从邮件正文提取核心主题/卖点短语"""
+    def _extract_themes_with_llm(self, email_body: str, customer_name: str) -> List[str]:
+        """使用 DeepSeek LLM 从邮件正文提取核心卖点并直接生成多样化的邮件标题"""
+        try:
+            from services.llm_client import LLMEmailClient
+            llm = LLMEmailClient()
+            if not llm.is_available():
+                print("[标题生成] DeepSeek API 不可用，回退到正则提取")
+                return []
+
+            system_prompt = (
+                "You are an expert email marketing copywriter. "
+                "Your task is to analyze the given email body and generate diverse, compelling email subject lines.\n\n"
+                "RULES:\n"
+                "1. Read the email body carefully and identify the core selling points, value propositions, and call-to-action.\n"
+                "2. Each subject line must reflect a DIFFERENT aspect or angle from the email content.\n"
+                "3. DO NOT use spam trigger words (free, urgent, act now, limited time, etc.).\n"
+                "4. Keep each subject line under 70 characters.\n"
+                "5. Include the customer name naturally in some subjects but not all.\n"
+                "6. Vary sentence styles: some direct statements, some questions, some benefit-driven.\n"
+                "7. Make each subject line unique and distinct from the others.\n"
+                "8. Output ONLY a valid JSON array of strings, no explanation, no markdown, no code fences.\n"
+            )
+            # 截取邮件正文核心部分（去掉问候语和签名）
+            body_for_analysis = email_body[:2000]
+            user_prompt = (
+                f"Customer name: {customer_name}\n\n"
+                f"Email body:\n{body_for_analysis}\n\n"
+                f"Generate exactly 10 unique email subject lines based on the content above. "
+                f"Output as JSON array of strings: [\"subject1\", \"subject2\", ...]"
+            )
+
+            result, error = llm._call(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=1000,
+                temperature=0.8,
+                label='subject_generation'
+            )
+
+            if error or not result:
+                print(f"[标题生成] LLM 调用失败: {error}")
+                return []
+
+            # 解析 JSON 数组
+            import json
+            result = result.strip()
+            # 处理可能的 markdown 代码块包裹
+            if result.startswith('```'):
+                result = re.sub(r'^```\w*\n?', '', result)
+                result = re.sub(r'\n?```$', '', result)
+
+            subjects_list = json.loads(result)
+            if not isinstance(subjects_list, list):
+                return []
+
+            # 清理和验证每个标题
+            valid_subjects = []
+            for s in subjects_list:
+                if not isinstance(s, str):
+                    continue
+                s = self._validate_and_clean(s.strip())
+                if s and len(s) > 10 and len(s) <= 80 and s not in valid_subjects:
+                    valid_subjects.append(s)
+
+            print(f"[标题生成] LLM 生成了 {len(valid_subjects)} 个有效标题")
+            return valid_subjects
+
+        except json.JSONDecodeError as e:
+            print(f"[标题生成] JSON 解析失败: {e}")
+            return []
+        except Exception as e:
+            print(f"[标题生成] LLM 提取异常: {e}")
+            return []
+
+    def _extract_themes_fallback(self, email_body: str) -> List[str]:
+        """回退方案：用正则从邮件正文提取核心主题/卖点短语"""
         themes = []
         body_lower = email_body.lower()
 

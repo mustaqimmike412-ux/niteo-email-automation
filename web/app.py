@@ -82,8 +82,34 @@ def _extract_name_from_email(email_address: str) -> str:
     return ''
 
 
-def _make_greeting(email_type: str, contact_name: str, email_address: str, customer_name: str) -> str:
-    """生成邮件称呼。个人邮箱有名字用名字，没名字用公司名+Team；公共邮箱直接用公司名+Team。"""
+def _make_greeting(email_type: str, contact_name: str, email_address: str, customer_name: str, user_id=None) -> str:
+    """生成邮件称呼。优先使用用户自定义问候语模板，否则按默认规则生成。"""
+    import re
+
+    # 优先查询用户自定义问候语模板
+    if user_id:
+        try:
+            from database.email_template_models import get_random_template
+            tpl = get_random_template(user_id, 'greeting')
+            if tpl:
+                text = tpl['template_text']
+                # 清理 contact_name
+                name = (contact_name or '').strip()
+                has_valid_name = name and name.lower() not in ('', 'n/a', 'unknown', 'none')
+                first_name = name.split()[0].title() if has_valid_name and ' ' in name else (name.title() if has_valid_name else '')
+                # 清理公司名
+                clean = re.sub(r'\s+(INC\.?|LLC\.?|Ltd\.?|PTY\.?|GMBH\.?|SA\.?|CORP\.?|CORPORATION\.?|LIMITED\.?|CO\.?)$', '', customer_name, flags=re.IGNORECASE)
+                clean = clean.replace('team', '').replace('Team', '').strip()
+                clean = ' '.join(clean.split())
+                clean = clean.title() if clean else 'Valued'
+                # 替换占位符
+                text = text.replace('{first_name}', first_name)
+                text = text.replace('{company_name}', clean)
+                text = text.replace('{team}', 'Team' if email_type != 'personal' or not has_valid_name else '')
+                return text
+        except Exception:
+            pass  # 回退到默认逻辑
+
     if email_type == 'personal':
         # 个人邮箱：仅用已有联系人姓名
         name = (contact_name or '').strip()
@@ -1864,12 +1890,16 @@ def api_country_customers(country):
         customers = []
         for r in rows:
             customer_id = r[0]
+            in_cooldown = False
+            days_remaining = 0
+            last_sent = None
+
             # 查询该公司是否在冷却期内（排除已手动解除的）
             cursor.execute('SELECT 1 FROM cooldown_override WHERE customer_id = ? AND (user_id IS NULL OR user_id = ?)',
                            (customer_id, current_user_id or 0))
             if cursor.fetchone():
-                in_cooldown = False
-                days_remaining = 0
+                # 已手动解除冷却，无需查询
+                pass
             else:
                 cursor.execute('''
                     SELECT MAX(sent_at) FROM email_logs
@@ -1878,8 +1908,6 @@ def api_country_customers(country):
                 ''', (customer_id, current_user_id))
                 last_sent = cursor.fetchone()[0]
 
-                in_cooldown = False
-                days_remaining = 0
                 if last_sent:
                     dt = _parse_datetime(last_sent)
                     if dt and dt.strftime('%Y-%m-%d %H:%M:%S') >= cutoff:
@@ -1954,8 +1982,8 @@ def api_customers_filter_preview():
             'send_status': data.get('send_status', 'all'),
             'search_keyword': data.get('search_keyword', ''),
             'cooldown_days': data.get('cooldown_days', 7),
-            'daily_limit': data.get('daily_limit', 1000),
-            'limit': data.get('limit', 200),
+            'daily_limit': data.get('daily_limit', 50),
+            'limit': data.get('limit', 50),
             'order_by': data.get('order_by', 'default'),
             'user_id': current_user_id,
         }
@@ -2316,7 +2344,7 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                     email_type = item['email_type']
                     contact_name = item.get('contact_name', '') or ''
                     email_addr = item.get('email_address', '') or ''
-                    greeting = _make_greeting(email_type, contact_name, email_addr, customer_name)
+                    greeting = _make_greeting(email_type, contact_name, email_addr, customer_name, user_id=user_id)
 
                     # 组装完整邮件正文
                     full_body = f"{greeting}\n\n{email_content['body']}\n\n{email_content['signature']}"
@@ -3425,7 +3453,7 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
         for email_row in emails:
             email_id, email_address, email_type, contact_name = email_row
             contact_name = contact_name or ''
-            greeting = _make_greeting(email_type, contact_name, email_address, customer_name)
+            greeting = _make_greeting(email_type, contact_name, email_address, customer_name, user_id=user_id)
             email_items_raw.append({
                 'email_id': email_id,
                 'customer_id': customer_id,
@@ -3436,16 +3464,24 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
             })
 
         if len(email_items_raw) > 1:
+            # 优先使用预览阶段已生成的标题池，避免重复调用LLM导致不一致
+            subjects_pool = task.get('subjects_pool')
+            if subjects_pool:
+                print(f"[单发] 使用预览阶段生成的标题池 ({len(subjects_pool)} 个)")
+            else:
+                print("[单发] 警告：未找到预览阶段标题池，将重新生成")
+
             subjects, assigned_items = subject_manager.generate_and_assign(
                 customer_id=customer_id,
                 customer_name=customer_name,
                 country=country,
                 industry='',
                 email_items=email_items_raw,
-                email_body=email_content['body'],  # 基于邮件内容生成标题
-                num_subjects=num_subjects
+                email_body=email_content['body'],
+                num_subjects=num_subjects,
+                subjects=subjects_pool  # 传入预先生成的标题池
             )
-            print(f"[单发] 生成 {len(subjects)} 个标题，随机分配给 {len(email_items_raw)} 个邮箱")
+            print(f"[单发] 标题分配给 {len(email_items_raw)} 个邮箱: {[it['subject'] for it in assigned_items]}")
         else:
             # 只有一个邮箱，直接用workflow生成的标题
             assigned_items = email_items_raw.copy()
@@ -3966,6 +4002,9 @@ def _do_generate_preview(task_id, customer_id, user_id=None, language='en'):
             'subjects': subject_pool  # 新增：标题池列表
         }
 
+        # 同时保存标题池到 task 根级，供发送阶段直接使用（避免重复调用LLM导致不一致）
+        task['subjects_pool'] = subject_pool
+
         # 标记生成完成（但不标记 send 步骤）
         task['status'] = 'completed'
         task['progress'] = 100
@@ -3987,6 +4026,7 @@ def api_email_send():
         email_addresses = data.get('email_addresses', [])
         subject = data.get('subject', '')
         body = data.get('body', '')
+        subjects_pool = data.get('subjects', [])  # 标题池，用于多邮箱时轮换
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
@@ -4036,7 +4076,7 @@ def api_email_send():
         admin = is_admin()
         thread = threading.Thread(
             target=_do_send_custom_email,
-            args=(task_id, customer_id, email_addresses, subject, body, current_user_id),
+            args=(task_id, customer_id, email_addresses, subject, body, current_user_id, subjects_pool),
             daemon=True
         )
         thread.start()
@@ -4047,7 +4087,7 @@ def api_email_send():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-def _do_send_custom_email(task_id, customer_id, email_addresses, subject, body, user_id=None):
+def _do_send_custom_email(task_id, customer_id, email_addresses, subject, body, user_id=None, subjects_pool=None):
     """后台发送用户自定义内容的邮件（使用队列管理器）"""
     task = send_tasks.get(task_id)
     if not task:
@@ -4103,15 +4143,15 @@ def _do_send_custom_email(task_id, customer_id, email_addresses, subject, body, 
 
         current_user_id = user_id or get_current_user_id()
 
-        # 构建邮件项列表
-        email_items = []
+        # 构建邮件项列表（先构建原始列表，再分配标题）
+        email_items_raw = []
         for email_row in emails:
             email_id, email_address, email_type, contact_name = email_row
             contact_name = contact_name or ''
 
-            greeting = _make_greeting(email_type, contact_name, email_address, customer_name)
+            greeting = _make_greeting(email_type, contact_name, email_address, customer_name, user_id=current_user_id)
 
-            email_items.append({
+            email_items_raw.append({
                 'email_id': email_id,
                 'customer_id': customer_id,
                 'email_address': email_address,
@@ -4122,6 +4162,35 @@ def _do_send_custom_email(task_id, customer_id, email_addresses, subject, body, 
                 'body': body,
                 'user_id': current_user_id,
             })
+
+        # 使用标题池进行轮换分配（多邮箱且标题池非空时）
+        if subjects_pool and len(subjects_pool) > 1 and len(email_items_raw) > 1:
+            from generators.subjects.manager import subject_manager
+            print(f"[自定义发送] 使用标题池轮换 ({len(subjects_pool)} 个标题 → {len(email_items_raw)} 个邮箱)")
+            assigned_items = subject_manager.assign_subjects_to_emails(
+                customer_id=customer_id,
+                customer_name=customer_name,
+                email_items=email_items_raw,
+                subjects=subjects_pool
+            )
+            email_items = []
+            for item in assigned_items:
+                email_items.append({
+                    'email_id': item['email_id'],
+                    'customer_id': customer_id,
+                    'email_address': item['email_address'],
+                    'email_type': item['email_type'],
+                    'contact_name': item['contact_name'],
+                    'greeting': item['greeting'],
+                    'subject': item.get('subject', subject),
+                    'body': body,
+                    'user_id': current_user_id,
+                })
+            print(f"[自定义发送] 标题分配结果: {[(it['email_address'], it['subject'][:30]) for it in email_items]}")
+        else:
+            email_items = email_items_raw
+            if subjects_pool:
+                print(f"[自定义发送] 标题池不足 ({len(subjects_pool)} 个标题, {len(email_items_raw)} 个邮箱)，使用单一标题")
 
         # 使用队列管理器发送
         send_config = task.get('send_config', {})
@@ -6147,6 +6216,71 @@ def update_email_guidelines_api():
     user_id = get_current_user_id()
     update_email_guidelines(data['content'], data.get('is_active', True), user_id=user_id)
     return jsonify({'success': True, 'message': '邮件规范已更新'})
+
+
+# ==================== 邮件模板配置 API ====================
+
+@app.route('/api/email-templates', methods=['GET'])
+@login_required
+@require_ajax
+def get_email_templates_api():
+    """获取当前用户的邮件模板列表"""
+    template_type = request.args.get('type')
+    if template_type not in ('greeting', 'opening'):
+        return jsonify({'success': False, 'error': 'type 必须是 greeting 或 opening'}), 400
+    user_id = get_current_user_id()
+    from database.email_template_models import get_templates
+    items = get_templates(user_id, template_type, active_only=False)
+    return jsonify({'success': True, 'data': items})
+
+
+@app.route('/api/email-templates', methods=['POST'])
+@login_required
+@require_ajax
+def add_email_template_api():
+    """新增模板"""
+    data = request.get_json() or {}
+    template_type = data.get('type')
+    template_text = data.get('template_text', '').strip()
+    if template_type not in ('greeting', 'opening'):
+        return jsonify({'success': False, 'error': 'type 必须是 greeting 或 opening'}), 400
+    if not template_text:
+        return jsonify({'success': False, 'error': '模板内容不能为空'}), 400
+    from database.email_template_models import add_template
+    tpl_id = add_template(get_current_user_id(), template_type, template_text)
+    return jsonify({'success': True, 'data': {'id': tpl_id}})
+
+
+@app.route('/api/email-templates/<int:template_id>', methods=['PUT'])
+@login_required
+@require_ajax
+def update_email_template_api(template_id):
+    """更新模板"""
+    data = request.get_json() or {}
+    from database.email_template_models import update_template
+    try:
+        update_template(
+            template_id,
+            template_text=data.get('template_text'),
+            is_active=data.get('is_active'),
+            user_id=get_current_user_id()
+        )
+        return jsonify({'success': True})
+    except PermissionError as e:
+        return jsonify({'success': False, 'error': str(e)}), 403
+
+
+@app.route('/api/email-templates/<int:template_id>', methods=['DELETE'])
+@login_required
+@require_ajax
+def delete_email_template_api(template_id):
+    """删除模板"""
+    from database.email_template_models import delete_template
+    try:
+        delete_template(template_id, user_id=get_current_user_id())
+        return jsonify({'success': True})
+    except PermissionError as e:
+        return jsonify({'success': False, 'error': str(e)}), 403
 
 
 # ==================== 跟进邮件模块 API ====================

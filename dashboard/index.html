@@ -1775,6 +1775,33 @@
                                             <input type="range" id="subject-count-target" min="0" max="10" value="0" style="width:100%" oninput="updateSubjectCountDisplay()">
                                         </div>
                                     </div>
+                                    <!-- 开场白与问候语模板配置（默认折叠） -->
+                                    <div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:10px;border:1px solid var(--surface-2)">
+                                        <div style="font-size:0.82rem;color:var(--text-2);font-weight:600;cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleTemplatePanel(this)">
+                                            <span>开场白与问候语模板</span>
+                                            <span style="font-size:1rem;color:var(--text-3)">+</span>
+                                        </div>
+                                        <div id="email-templates-panel" style="display:none">
+                                            <!-- 问候语模板 -->
+                                            <div style="margin-top:10px">
+                                                <div style="font-size:0.8rem;color:var(--text-3);font-weight:600;margin-bottom:6px">问候语模板</div>
+                                                <div id="greeting-templates-list" style="display:flex;flex-direction:column;gap:6px"></div>
+                                                <button class="btn btn-ghost btn-sm" style="margin-top:6px;width:100%" onclick="addEmailTemplate('greeting')">+ 添加问候语模板</button>
+                                            </div>
+                                            <!-- 开场白模板 -->
+                                            <div style="margin-top:12px">
+                                                <div style="font-size:0.8rem;color:var(--text-3);font-weight:600;margin-bottom:6px">开场白模板</div>
+                                                <div id="opening-templates-list" style="display:flex;flex-direction:column;gap:6px"></div>
+                                                <button class="btn btn-ghost btn-sm" style="margin-top:6px;width:100%" onclick="addEmailTemplate('opening')">+ 添加开场白模板</button>
+                                            </div>
+                                            <!-- 变量提示 -->
+                                            <div style="font-size:0.72rem;color:var(--text-3);margin-top:10px;padding:8px;background:var(--surface-1);border-radius:6px">
+                                                <div style="font-weight:600;margin-bottom:4px">可用变量：</div>
+                                                <div>问候语：{first_name} {company_name} {team}</div>
+                                                <div>开场白：{sender_name} {job_title} {company_name} {customer_name} {product}</div>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <!-- 发送调度设置（默认折叠） -->
                                     <div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:10px;border:1px solid var(--surface-2)">
                                         <div style="font-size:0.82rem;color:var(--text-2);font-weight:600;cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('span:last-child').textContent=this.nextElementSibling.style.display==='none'?'+':'−'">
@@ -6652,6 +6679,7 @@
         // 重置编辑器状态
         currentEmailSubject = '';
         currentEmailBody = '';
+        currentEmailSubjects = [];
         document.getElementById('btn-group-initial').style.display = 'flex';
         document.getElementById('btn-send-email').style.display = 'none';
         document.getElementById('btn-regenerate').style.display = 'none';
@@ -6794,6 +6822,90 @@
         etaDiv.style.display = 'block';
     }
 
+    // ==================== 邮件模板配置交互 ====================
+
+    function toggleTemplatePanel(header) {
+        const panel = document.getElementById('email-templates-panel');
+        const icon = header.querySelector('span:last-child');
+        if (panel.style.display === 'none') {
+            panel.style.display = 'block';
+            icon.textContent = '−';
+            loadEmailTemplates('greeting');
+            loadEmailTemplates('opening');
+        } else {
+            panel.style.display = 'none';
+            icon.textContent = '+';
+        }
+    }
+
+    async function loadEmailTemplates(type) {
+        const res = await api(`/api/email-templates?type=${type}`);
+        if (!res || !res.success) return;
+        const container = document.getElementById(type + '-templates-list');
+        if (!container) return;
+        container.innerHTML = '';
+        (res.data || []).forEach(tpl => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;gap:6px;align-items:center';
+            row.innerHTML = `
+                <input type="text" class="form-input" value="${esc(tpl.template_text)}"
+                    style="flex:1;font-size:0.82rem;padding:6px 8px"
+                    onchange="updateEmailTemplate(${tpl.id}, this.value, ${tpl.is_active ? 1 : 0})">
+                <button class="btn btn-ghost btn-sm" onclick="toggleTemplateActive(${tpl.id}, ${tpl.is_active ? 0 : 1}, '${type}')"
+                    title="${tpl.is_active ? '禁用' : '启用'}" style="min-width:32px">${tpl.is_active ? '✓' : '○'}</button>
+                <button class="btn btn-ghost btn-sm" onclick="deleteEmailTemplate(${tpl.id}, '${type}')" title="删除">🗑</button>
+            `;
+            container.appendChild(row);
+        });
+    }
+
+    async function addEmailTemplate(type) {
+        const defaults = {
+            greeting: 'Hi {first_name},',
+            opening: "Having followed {customer_name}'s expansion into the industry, I wanted to reach out."
+        };
+        const res = await api('/api/email-templates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: type, template_text: defaults[type] })
+        });
+        if (res && res.success) {
+            loadEmailTemplates(type);
+            toast('已添加模板', 'ok');
+        } else {
+            toast(res?.error || '添加失败', 'err');
+        }
+    }
+
+    async function updateEmailTemplate(id, text, isActive) {
+        const res = await api(`/api/email-templates/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template_text: text.trim(), is_active: isActive })
+        });
+        if (res && res.success) toast('已更新', 'ok');
+    }
+
+    async function toggleTemplateActive(id, newState, type) {
+        const res = await api(`/api/email-templates/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_active: newState })
+        });
+        if (res && res.success) {
+            loadEmailTemplates(type);
+        }
+    }
+
+    async function deleteEmailTemplate(id, type) {
+        if (!confirm('确定删除此模板吗？')) return;
+        const res = await api(`/api/email-templates/${id}`, { method: 'DELETE' });
+        if (res && res.success) {
+            loadEmailTemplates(type);
+            toast('已删除', 'ok');
+        }
+    }
+
     function updateSelectedInfo() {
         const checks = document.querySelectorAll('.send-email-check:checked');
         selectedEmails = Array.from(checks).map(ch => ({
@@ -6814,7 +6926,7 @@
 
             // 如果已生成过邮件，保持编辑器；否则显示提示
             if (currentEmailSubject) {
-                showEmailEditor(currentEmailSubject, currentEmailBody);
+                showEmailEditor(currentEmailSubject, currentEmailBody, currentEmailSubjects);
             } else {
                 document.getElementById('send-preview').innerHTML = `
                     <div style="padding:16px;background:var(--bg);border-radius:10px;font-size:0.84rem;line-height:1.7;color:var(--text-2)">
@@ -7145,6 +7257,7 @@
     // 当前生成的邮件内容（用于编辑后发送）
     let currentEmailSubject = '';
     let currentEmailBody = '';
+    let currentEmailSubjects = [];  // 标题池列表
 
     async function generateEmailPreview() {
         if (!selectedCustomerId) { toast('请先选择客户', 'err'); return; }
@@ -7200,7 +7313,8 @@
             if (preview) {
                 currentEmailSubject = preview.subject || '';
                 currentEmailBody = preview.body || '';
-                showEmailEditor(currentEmailSubject, currentEmailBody, preview.subjects || []);
+                currentEmailSubjects = preview.subjects || [];
+                showEmailEditor(currentEmailSubject, currentEmailBody, currentEmailSubjects);
                 toast('邮件内容已生成，请检查并编辑', 'info');
             }
             return true;
@@ -7394,6 +7508,7 @@
                 email_addresses: selectedEmails.map(e => e.address),
                 subject: subject,
                 body: body,
+                subjects: currentEmailSubjects || [],  // 传入标题池，后端会轮换分配给不同邮箱
                 ...sendConfig
             })
         });

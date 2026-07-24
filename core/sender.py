@@ -130,7 +130,9 @@ class EmailSender:
             msg['X-Auto-Response-Suppress'] = 'All'  # 防止自动回复循环
 
             # 预退信头（RFC 8058），提高送达率
-            msg['List-Unsubscribe'] = '<mailto:%s?subject=unsubscribe>' % sender_email
+            # 同时提供 mailto 和 HTTPS 两种退订方式
+            msg['List-Unsubscribe'] = '<mailto:%s?subject=unsubscribe>, <https://exim-flow.com/unsubscribe>' % sender_email
+            msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
             msg['Feedback-ID'] = 'tradelink:%s' % (str(int(time.time()))[-8:])
 
             # 添加邮件正文
@@ -181,35 +183,40 @@ class EmailSender:
             return False, f"发送失败: {error_str}"
 
     def _text_to_html(self, text, sender_name=''):
-        """将纯文本转换为专业HTML格式（降低垃圾邮件评分）"""
+        """将纯文本转换为专业HTML格式（模拟自然手写邮件结构，降低垃圾邮件评分）"""
         lines = text.strip().split('\n')
-        html_lines = []
+        # 合并空行作为段落分隔，连续非空行合并为一个段落
+        paragraphs = []
+        current_para = []
         for line in lines:
             if not line.strip():
-                html_lines.append('<br>')
+                if current_para:
+                    paragraphs.append(' '.join(current_para))
+                    current_para = []
             else:
-                escaped = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                html_lines.append(f'<p style="margin:0 0 8px 0;line-height:1.6;color:#333;">{escaped}</p>')
+                current_para.append(line.strip())
+        if current_para:
+            paragraphs.append(' '.join(current_para))
 
-        paragraphs = '\n'.join(html_lines)
+        # 生成段落HTML（自然的段落间距）
+        html_paragraphs = []
+        for para in paragraphs:
+            escaped = para.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            html_paragraphs.append(
+                f'<p style="margin:0 0 14px 0;line-height:1.65;color:#333;font-size:14px;">{escaped}</p>'
+            )
+
+        body_content = '\n'.join(html_paragraphs)
         brand = sender_name or 'TradeLink'
         html = f"""<html>
 <head><meta charset="utf-8"></head>
-<body style="font-family:Arial,Helvetica,sans-serif;line-height:1.6;color:#333;background:#fff;margin:0;padding:0;">
-<table width="100%%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:20px 0;">
-<tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-<tr><td style="padding:24px 32px 16px 32px;">
-<div style="font-size:14px;color:#666;border-bottom:1px solid #eee;padding-bottom:12px;margin-bottom:16px;">
-{paragraphs}
-</div>
-</td></tr>
-<tr><td style="background:#fafafa;padding:16px 32px;border-top:1px solid #eee;">
+<body style="font-family:Arial,Helvetica,sans-serif;line-height:1.65;color:#333;background:#ffffff;margin:0;padding:20px;">
+<div style="max-width:600px;margin:0 auto;font-size:14px;">
+{body_content}
+<div style="margin-top:24px;padding-top:16px;border-top:1px solid #eee;">
 <p style="margin:0;font-size:12px;color:#999;">{brand}</p>
-</td></tr>
-</table>
-</td></tr>
-</table>
+</div>
+</div>
 </body>
 </html>"""
         return html

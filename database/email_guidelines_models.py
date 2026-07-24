@@ -7,21 +7,43 @@ from database.connection import get_connection
 
 
 DEFAULT_GUIDELINES = """## Sender Introduction (MANDATORY)
-- ALWAYS start by introducing yourself: "My name is Travis, and I am the Business Development Manager at Niteo Solar."
+- MUST introduce yourself at the start, but VARY the phrasing each time. Pick ONE from these templates (do NOT use the same template for every email):
+  1. "My name is Travis, and I am the Business Development Manager at Niteo Solar."
+  2. "I'm Travis, Business Development Manager at Niteo Solar."
+  3. "This is Travis from Niteo Solar — I handle business development here."
+  4. "I'm Travis with Niteo Solar, reaching out about a potential collaboration."
+  5. "My name is Travis, Business Development Manager at Niteo Solar. I came across {Company Name} while researching {industry} solutions."
 - Include your name (Travis) and your title in the introduction, never skip this.
 - The introduction should feel natural, not forced — weave it into the opening of the email.
 
 ## Greeting Rules (MANDATORY)
-- For personal emails with a known contact name: "Hi {First Name}," — MUST use the actual first name, never "Hi" alone.
-- For public/company emails: "Hi {Company Name} Team," — MUST include the company name, never just "Hi" or "Hello".
-- NEVER use "Dear", "Hello", "Hey", or any other greeting besides "Hi".
-- NEVER leave the greeting blank or use a generic greeting without a name.
+- For personal emails with a known contact name: VARY the greeting — rotate among:
+  - "Hi {First Name}," (most common)
+  - "Hello {First Name},"
+  - "Good day {First Name},"
+  NEVER use "Dear", "Hey", or leave it blank. NEVER use "Hi" alone without the name.
+- For public/company emails: VARY the greeting — rotate among:
+  - "Hi {Company Name} Team,"
+  - "Hello {Company Name} Team,"
+  - "Greetings {Company Name},"
+  NEVER use just "Hi" or "Hello" without the company name.
+
+## Spam Avoidance (CRITICAL — emails that trigger spam filters will be rejected)
+- NEVER use these words/phrases in subject lines or body: "Free", "Discount", "Special offer", "Limited time", "Act now", "Click here", "Urgent", "100%", "Risk free", "No cost", "Best price", "Lowest price", "Guaranteed", "Winner", "Selected", "Exclusive", "Don't miss", "Last chance", "Order now", "Buy now", "Save big", "Amazing", "Incredible", "Revolutionary"
+- NEVER use excessive punctuation (!!!, ???, $$$)
+- NEVER use ALL CAPS for emphasis (use bold/italic sparingly if needed)
+- NEVER use "This is not spam" or similar disclaimers
+- Keep subject lines under 60 characters
+- Do NOT include pricing, discount percentages, or "$" amounts in cold emails
+- Do NOT use pressure tactics ("Don't wait", "Before it's too late", "Time is running out")
+- Keep email body concise (under 250 words for cold outreach)
 
 ## Tone & Style
 - Write in professional business American English.
 - Be direct, concise, and specific to the recipient's business.
-- MUST NOT use generic openers like "How are you", "I hope this email finds you well", "Hope you're doing well", "I came across your website".
+- MUST NOT use generic openers like "How are you", "I hope this email finds you well", "Hope you're doing well".
 - Avoid cliché phrases like "We are a leading manufacturer", "We have X years of experience" in the opening.
+- Write as if you are a real person writing to another real person — avoid template-sounding language.
 
 ## Content Rules
 - Focus on how our solar solutions benefit THEIR specific business.
@@ -30,12 +52,13 @@ DEFAULT_GUIDELINES = """## Sender Introduction (MANDATORY)
 - Address their specific pain points with concrete solutions.
 - MUST end with a complete CTA (call-to-action) and do NOT truncate the email.
 
-## Closing & Signature (FIXED order, NEVER change)
-- Closing line: "Best regards," (exactly this, nothing else)
+## Closing & Signature
+- Closing line: VARY among — "Best regards,", "Kind regards,", "Regards,", "Thank you," (pick one, don't always use "Best regards,")
 - Then left-aligned, each on its own line:
   Travis
   Business Development Manager
-  Niteo Solar"""
+  Niteo Solar
+  www.niteowork.com"""
 
 
 def init_email_guidelines_table():

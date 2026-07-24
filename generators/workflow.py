@@ -808,13 +808,52 @@ class EmailComposer:
     
     def _generate_greeting(self, contact_name: str = None, customer_name: str = 'Team', email_type: str = 'public') -> str:
         """
-        生成称呼（严格规则）
-        1. 公共邮箱 / 无具体联系人: Hi [对方公司名称] Team,
-        2. 有具体联系人姓名: Hi [First Name],
-        统一使用 Hi，不使用 Dear。
+        生成称呼（多样化规则，避免模式化特征）
+        1. 优先使用用户自定义问候语模板（如有配置）
+        2. 公共邮箱 / 无具体联系人: 随机选择 "Hi/Hello/Greetings" + [对方公司名称] Team,
+        3. 有具体联系人姓名: 随机选择 "Hi/Hello/Good day" + [First Name],
         """
         import re
-        
+        import random
+
+        # 优先查询用户自定义问候语模板
+        if getattr(self, 'user_id', None):
+            try:
+                from database.email_template_models import get_random_template
+                tpl = get_random_template(self.user_id, 'greeting')
+                if tpl:
+                    text = tpl['template_text']
+                    # 清理 contact_name
+                    invalid_names = {'n/a', 'na', '-', '', 'team', 'unknown', 'none'}
+                    has_valid_name = (
+                        contact_name and
+                        contact_name.strip() and
+                        contact_name.strip().lower() not in invalid_names
+                    )
+                    first_name = ''
+                    if has_valid_name:
+                        first_name = contact_name.strip().split()[0].strip().title()
+                    # 清理公司名
+                    clean_name = customer_name
+                    suffix_patterns = [
+                        r'\s+INC\.?$', r'\s+LLC\.?$', r'\s+LTD\.?$', r'\s+PTY\.?$',
+                        r'\s+GMBH\.?$', r'\s+SA\.?$', r'\s+CORP\.?$', r'\s+CORPORATION\.?$',
+                        r'\s+LIMITED\.?$', r'\s+CO\.?$'
+                    ]
+                    for pattern in suffix_patterns:
+                        clean_name = re.sub(pattern, '', clean_name, flags=re.IGNORECASE)
+                    clean_name = clean_name.strip().title() if clean_name.strip() else 'Valued'
+                    # 替换占位符
+                    text = text.replace('{first_name}', first_name)
+                    text = text.replace('{company_name}', clean_name)
+                    text = text.replace('{team}', 'Team' if email_type != 'personal' or not has_valid_name else '')
+                    return text
+            except Exception:
+                pass  # 模板查询失败时回退到默认逻辑
+
+        personal_greetings = ['Hi', 'Hello', 'Good day']
+        company_greetings = ['Hi', 'Hello', 'Greetings']
+
         # 清理并验证 contact_name
         invalid_names = {'n/a', 'na', '-', '', 'team', 'unknown', 'none'}
         has_valid_name = (
@@ -822,14 +861,13 @@ class EmailComposer:
             contact_name.strip() and 
             contact_name.strip().lower() not in invalid_names
         )
-        
+
         # 只有个人邮箱且有有效名字时才使用名字称呼
         if email_type == 'personal' and has_valid_name:
-            # 有具体联系人 - 只取 First Name
             first_name = contact_name.strip().split()[0].strip().title()
-            return f"Hi {first_name},"
+            greeting = random.choice(personal_greetings)
+            return f"{greeting} {first_name},"
         else:
-            # 公共邮箱或无有效名字 - 使用公司名 + Team
             clean_name = customer_name
             suffix_patterns = [
                 r'\s+INC\.?$', r'\s+LLC\.?$', r'\s+LTD\.?$', r'\s+PTY\.?$',
@@ -840,7 +878,8 @@ class EmailComposer:
                 clean_name = re.sub(pattern, '', clean_name, flags=re.IGNORECASE)
             clean_name = clean_name.strip()
             clean_name = clean_name.title() if clean_name else 'Valued'
-            return f"Hi {clean_name} Team,"
+            greeting = random.choice(company_greetings)
+            return f"{greeting} {clean_name} Team,"
     
     def _generate_body(self, research_result: Dict, classification: Dict,
                        fabe_points: List[Dict], materials: Dict,
@@ -1662,12 +1701,36 @@ class EmailWorkflow:
         # ===== 节点6: 邮件生成（LLM）=====
         print(f"\n[节点6] 邮件生成 (LLM)")
         _notify('compose', 'running')
+
+        # 查询用户自定义开场白模板（如有配置则传入 LLM）
+        opening_template = None
+        if getattr(self, 'user_id', None):
+            try:
+                from database.email_template_models import get_random_template
+                tpl = get_random_template(self.user_id, 'opening')
+                if tpl:
+                    text = tpl['template_text']
+                    # 替换占位符
+                    text = text.replace('{sender_name}', company_info.get('sender_name', 'Travis'))
+                    text = text.replace('{job_title}', company_info.get('job_title', 'Business Development Manager'))
+                    text = text.replace('{company_name}', company_info.get('company_name', 'Niteo Solar'))
+                    text = text.replace('{customer_name}', customer_name)
+                    profile = research_result.get('module1_profile', {})
+                    products = profile.get('core_products', [])
+                    product = products[0] if products else 'your products'
+                    text = text.replace('{product}', product)
+                    opening_template = text
+                    print(f"  [模板] 使用用户开场白模板: {opening_template[:60]}...")
+            except Exception as e:
+                print(f"  [模板] 开场白模板查询失败: {e}")
+
         llm_email = self.llm.compose_email(
             research_result, classification, fabe_points, materials,
             contact_name=contact_name_for_email, email_type=email_type,
             has_website=has_website, company_info=company_info,
             target_word_count=target_word_count,
-            language=language
+            language=language,
+            opening_template=opening_template
         )
 
         if llm_email.get('error'):

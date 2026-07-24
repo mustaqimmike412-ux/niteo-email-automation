@@ -193,6 +193,21 @@ def init_database():
         )
     ''')
 
+    # 用户邮件模板池表（开场白 + 问候语）
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_email_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            template_type TEXT NOT NULL CHECK(template_type IN ('greeting', 'opening')),
+            template_text TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_templates_user ON user_email_templates(user_id, template_type)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_templates_active ON user_email_templates(user_id, template_type, is_active)')
+
     # 客户主题池表
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS customer_subjects (
