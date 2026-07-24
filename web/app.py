@@ -6521,12 +6521,14 @@ def update_email_guidelines_api():
 @login_required
 @require_ajax
 def get_email_templates_api():
-    """获取当前用户的邮件模板列表"""
+    """获取当前用户的邮件模板列表（首次访问时自动初始化默认模板）"""
     template_type = request.args.get('type')
     if template_type not in ('greeting', 'opening'):
         return jsonify({'success': False, 'error': 'type 必须是 greeting 或 opening'}), 400
     user_id = get_current_user_id()
-    from database.email_template_models import get_templates
+    from database.email_template_models import get_templates, init_default_templates
+    # 首次访问时自动初始化默认模板
+    init_default_templates(user_id)
     items = get_templates(user_id, template_type, active_only=False)
     return jsonify({'success': True, 'data': items})
 
