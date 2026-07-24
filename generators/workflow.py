@@ -806,6 +806,24 @@ class EmailComposer:
         import random
         return random.choice(subjects)
     
+    def _is_valid_name(self, name: str) -> bool:
+        """检查名字是否有效（至少包含一个字母字符，不只是标点/数字/空白）"""
+        if not name or not name.strip():
+            return False
+        stripped = name.strip()
+        if stripped.lower() in {'n/a', 'na', '-', '', 'team', 'unknown', 'none'}:
+            return False
+        if not any(c.isalpha() for c in stripped):
+            return False
+        return True
+
+    def _extract_first_name(self, contact_name: str) -> str:
+        """从 contact_name 提取 first_name，带有效性校验"""
+        if not self._is_valid_name(contact_name):
+            return ''
+        first = contact_name.strip().split()[0].strip()
+        return first if any(c.isalpha() for c in first) else ''
+
     def _generate_greeting(self, contact_name: str = None, customer_name: str = 'Team', email_type: str = 'public') -> str:
         """
         生成称呼（多样化规则，避免模式化特征）
@@ -816,6 +834,13 @@ class EmailComposer:
         import re
         import random
 
+        # 防御：customer_name 为 None 时兜底（避免默认 Team 导致后面加 Team 重复）
+        safe_customer_name = (customer_name or 'Valued').strip()
+
+        # 提取有效的 first_name（若无效则回退到公司名）
+        first_name = self._extract_first_name(contact_name)
+        has_valid_name = bool(first_name)
+
         # 优先查询用户自定义问候语模板
         if getattr(self, 'user_id', None):
             try:
@@ -823,18 +848,8 @@ class EmailComposer:
                 tpl = get_random_template(self.user_id, 'greeting')
                 if tpl:
                     text = tpl['template_text']
-                    # 清理 contact_name
-                    invalid_names = {'n/a', 'na', '-', '', 'team', 'unknown', 'none'}
-                    has_valid_name = (
-                        contact_name and
-                        contact_name.strip() and
-                        contact_name.strip().lower() not in invalid_names
-                    )
-                    first_name = ''
-                    if has_valid_name:
-                        first_name = contact_name.strip().split()[0].strip().title()
                     # 清理公司名
-                    clean_name = customer_name
+                    clean_name = safe_customer_name
                     suffix_patterns = [
                         r'\s+INC\.?$', r'\s+LLC\.?$', r'\s+LTD\.?$', r'\s+PTY\.?$',
                         r'\s+GMBH\.?$', r'\s+SA\.?$', r'\s+CORP\.?$', r'\s+CORPORATION\.?$',
@@ -847,28 +862,22 @@ class EmailComposer:
                     text = text.replace('{first_name}', first_name)
                     text = text.replace('{company_name}', clean_name)
                     text = text.replace('{team}', 'Team' if email_type != 'personal' or not has_valid_name else '')
-                    return text
+                    # 防御：模板替换后不能为空或只剩问候词
+                    text_stripped = text.strip().rstrip(',').strip()
+                    if text_stripped and text_stripped.lower() not in ('hi', 'hello', 'dear', 'good day'):
+                        return text
             except Exception:
                 pass  # 模板查询失败时回退到默认逻辑
 
         personal_greetings = ['Hi', 'Hello', 'Good day']
         company_greetings = ['Hi', 'Hello', 'Greetings']
 
-        # 清理并验证 contact_name
-        invalid_names = {'n/a', 'na', '-', '', 'team', 'unknown', 'none'}
-        has_valid_name = (
-            contact_name and 
-            contact_name.strip() and 
-            contact_name.strip().lower() not in invalid_names
-        )
-
         # 只有个人邮箱且有有效名字时才使用名字称呼
         if email_type == 'personal' and has_valid_name:
-            first_name = contact_name.strip().split()[0].strip().title()
             greeting = random.choice(personal_greetings)
             return f"{greeting} {first_name},"
         else:
-            clean_name = customer_name
+            clean_name = safe_customer_name
             suffix_patterns = [
                 r'\s+INC\.?$', r'\s+LLC\.?$', r'\s+LTD\.?$', r'\s+PTY\.?$',
                 r'\s+GMBH\.?$', r'\s+SA\.?$', r'\s+CORP\.?$', r'\s+CORPORATION\.?$',
@@ -1484,7 +1493,7 @@ class EmailWorkflow:
 
         return result
 
-    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None, selected_material_ids=None, skip_refine=False, skip_format=False, language='en'):
+    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None, selected_material_ids=None, skip_refine=False, skip_format=False, language='en', opening_template=None):
         """使用 DeepSeek V4 Pro 生成邮件（LLM 增强模式）
 
         Args:
@@ -1702,9 +1711,11 @@ class EmailWorkflow:
         print(f"\n[节点6] 邮件生成 (LLM)")
         _notify('compose', 'running')
 
-        # 查询用户自定义开场白模板（如有配置则传入 LLM）
-        opening_template = None
-        if getattr(self, 'user_id', None):
+        # 处理开场白模板：优先使用外部传入的，否则随机获取
+        if opening_template:
+            # 外部已传入（已替换变量），直接使用
+            print(f"  [模板] 使用指定开场白模板: {opening_template[:60]}...")
+        elif getattr(self, 'user_id', None):
             try:
                 from database.email_template_models import get_random_template
                 tpl = get_random_template(self.user_id, 'opening')
@@ -1720,7 +1731,7 @@ class EmailWorkflow:
                     product = products[0] if products else 'your products'
                     text = text.replace('{product}', product)
                     opening_template = text
-                    print(f"  [模板] 使用用户开场白模板: {opening_template[:60]}...")
+                    print(f"  [模板] 使用随机开场白模板: {opening_template[:60]}...")
             except Exception as e:
                 print(f"  [模板] 开场白模板查询失败: {e}")
 
@@ -2149,7 +2160,8 @@ class EmailWorkflow:
                         progress_callback=None, target_word_count=None,
                         selected_material_ids: list = None,
                         skip_refine=False, skip_format=False,
-                        language: str = 'en') -> Dict:
+                        language: str = 'en',
+                        opening_template: str = None) -> Dict:
         """
         一键生成开发信
 
@@ -2160,6 +2172,7 @@ class EmailWorkflow:
             target_word_count: 目标字数范围 {'min': int, 'max': int}
             selected_material_ids: 用户手动选中的素材ID列表
             language: 邮件语言 (en/fr/de)，默认英语
+            opening_template: 用户指定的开场白模板（已替换变量后的文本），传入时优先使用
 
         Returns:
             包含主题、正文、HTML的完整邮件字典
@@ -2167,7 +2180,7 @@ class EmailWorkflow:
         has_website = bool(website and website.strip() and website.strip().startswith('http'))
 
         # 所有模式都使用 LLM 生成（不再区分模板/LLM 模式）
-        return self._generate_with_llm(customer_name, website, progress_callback, target_word_count, selected_material_ids, skip_refine=skip_refine, skip_format=skip_format, language=language)
+        return self._generate_with_llm(customer_name, website, progress_callback, target_word_count, selected_material_ids, skip_refine=skip_refine, skip_format=skip_format, language=language, opening_template=opening_template)
 
 
 if __name__ == '__main__':

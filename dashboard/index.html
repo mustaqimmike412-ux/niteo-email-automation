@@ -1782,15 +1782,24 @@
                                             <span style="font-size:1rem;color:var(--text-3)">+</span>
                                         </div>
                                         <div id="email-templates-panel" style="display:none">
-                                            <!-- 问候语模板 -->
-                                            <div style="margin-top:10px">
-                                                <div style="font-size:0.8rem;color:var(--text-3);font-weight:600;margin-bottom:6px">问候语模板</div>
+                                            <!-- 发送模板选择 -->
+                                            <div style="margin-top:10px;padding:10px;background:var(--surface-1);border-radius:8px;border:1px solid var(--surface-2)">
+                                                <div style="font-size:0.8rem;color:var(--text-2);font-weight:600;margin-bottom:8px">📋 发送时使用的模板（将自动穿插分配）</div>
+                                                <div style="font-size:0.72rem;color:var(--text-3);margin-bottom:8px">选择 2-3 个问候语和 2-3 个开场白，系统会在不同邮件中自动穿插使用。</div>
+                                                <div style="font-size:0.78rem;color:var(--text-3);font-weight:600;margin-bottom:6px">问候语（可多选，最多3个）</div>
+                                                <div id="greeting-templates-selector" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px"></div>
+                                                <div style="font-size:0.78rem;color:var(--text-3);font-weight:600;margin-bottom:6px">开场白（可多选，最多3个）</div>
+                                                <div id="opening-templates-selector" style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px"></div>
+                                            </div>
+                                            <!-- 问候语模板管理 -->
+                                            <div style="margin-top:12px">
+                                                <div style="font-size:0.8rem;color:var(--text-3);font-weight:600;margin-bottom:6px">问候语模板管理</div>
                                                 <div id="greeting-templates-list" style="display:flex;flex-direction:column;gap:6px"></div>
                                                 <button class="btn btn-ghost btn-sm" style="margin-top:6px;width:100%" onclick="addEmailTemplate('greeting')">+ 添加问候语模板</button>
                                             </div>
-                                            <!-- 开场白模板 -->
+                                            <!-- 开场白模板管理 -->
                                             <div style="margin-top:12px">
-                                                <div style="font-size:0.8rem;color:var(--text-3);font-weight:600;margin-bottom:6px">开场白模板</div>
+                                                <div style="font-size:0.8rem;color:var(--text-3);font-weight:600;margin-bottom:6px">开场白模板管理</div>
                                                 <div id="opening-templates-list" style="display:flex;flex-direction:column;gap:6px"></div>
                                                 <button class="btn btn-ghost btn-sm" style="margin-top:6px;width:100%" onclick="addEmailTemplate('opening')">+ 添加开场白模板</button>
                                             </div>
@@ -6832,6 +6841,8 @@
             icon.textContent = '−';
             loadEmailTemplates('greeting');
             loadEmailTemplates('opening');
+            loadEmailTemplateSelectors('greeting');
+            loadEmailTemplateSelectors('opening');
         } else {
             panel.style.display = 'none';
             icon.textContent = '+';
@@ -6857,6 +6868,45 @@
             `;
             container.appendChild(row);
         });
+    }
+
+    async function loadEmailTemplateSelectors(type) {
+        const res = await api(`/api/email-templates?type=${type}`);
+        if (!res || !res.success) return;
+        const container = document.getElementById(type + '-templates-selector');
+        if (!container) return;
+        container.innerHTML = '';
+        const items = res.data || [];
+        if (items.length === 0) {
+            container.innerHTML = '<div style="font-size:0.72rem;color:var(--text-3)">暂无模板，请先在下方的模板管理中添加。</div>';
+            return;
+        }
+        items.forEach(tpl => {
+            const row = document.createElement('label');
+            row.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.78rem;color:var(--text-2);padding:4px 6px;border-radius:6px;transition:background 0.15s';
+            row.innerHTML = `
+                <input type="checkbox" class="tpl-check-${type}" value="${tpl.id}" data-text="${esc(tpl.template_text)}"
+                    onchange="onTemplateCheckboxChange('${type}', this)">
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(tpl.template_text)}</span>
+            `;
+            row.addEventListener('mouseenter', () => row.style.background = 'var(--surface-2)');
+            row.addEventListener('mouseleave', () => row.style.background = 'transparent');
+            container.appendChild(row);
+        });
+    }
+
+    function onTemplateCheckboxChange(type, checkbox) {
+        const max = 3;
+        const checked = document.querySelectorAll(`.tpl-check-${type}:checked`);
+        if (checked.length > max) {
+            checkbox.checked = false;
+            toast(`最多只能选择 ${max} 个${type === 'greeting' ? '问候语' : '开场白'}模板`, 'warn');
+        }
+    }
+
+    function getSelectedTemplateIds(type) {
+        const checked = document.querySelectorAll(`.tpl-check-${type}:checked`);
+        return Array.from(checked).map(cb => parseInt(cb.value));
     }
 
     async function addEmailTemplate(type) {
@@ -7274,10 +7324,12 @@
 
         const targetWordCount = getTargetWordCount();
         const numSubjects = getSubjectCount();
+        const selectedGreetingIds = getSelectedTemplateIds('greeting');
+        const selectedOpeningIds = getSelectedTemplateIds('opening');
         const res = await api('/api/email/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ customer_id: selectedCustomerId, target_word_count: targetWordCount, num_subjects: numSubjects, selected_material_ids: selectedMaterialIds })
+            body: JSON.stringify({ customer_id: selectedCustomerId, target_word_count: targetWordCount, num_subjects: numSubjects, selected_material_ids: selectedMaterialIds, selected_greeting_ids: selectedGreetingIds, selected_opening_ids: selectedOpeningIds })
         });
 
         if (!res || !res.task_id) {
@@ -7547,6 +7599,8 @@
         const sendConfig = getSendConfig();
         const targetWordCount = getTargetWordCount();
         const numSubjects = getSubjectCount();
+        const selectedGreetingIds = getSelectedTemplateIds('greeting');
+        const selectedOpeningIds = getSelectedTemplateIds('opening');
         const res = await api('/api/send/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -7556,6 +7610,8 @@
                 target_word_count: targetWordCount,
                 num_subjects: numSubjects,
                 selected_material_ids: selectedMaterialIds,
+                selected_greeting_ids: selectedGreetingIds,
+                selected_opening_ids: selectedOpeningIds,
                 ...sendConfig
             })
         });

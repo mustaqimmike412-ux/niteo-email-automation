@@ -383,13 +383,38 @@ class SendQueueManager:
 
                 # 组装完整邮件正文：称呼 + 正文
                 # 去除 LLM 可能残留的 greeting 行，统一用正确的 per-recipient greeting
-                body = item.body or ''
+                original_body = item.body or ''
                 greeting = item.greeting or ''
-                if greeting and body:
+                body = original_body
+                assembled_body = None
+                if body:
                     import re
-                    # 去除 body 开头可能残留的 "Hi xxx," / "Dear xxx," / "Hello xxx," 行
-                    body = re.sub(r'^(Hi|Dear|Hello)\s+[^,]{1,50},\s*\n*', '', body.lstrip()).strip()
+                    # greeting 为空时先尝试从 body 开头提取已有问候语复用
+                    if not greeting:
+                        m = re.match(r'^(Hi|Dear|Hello|Good day)\s+([^,\n]{1,50})(?:,?)', body.lstrip(), re.IGNORECASE)
+                        if m:
+                            greeting = m.group(0).strip().rstrip(',')
+                        else:
+                            greeting = 'Hi Team'
+                    # 去除 body 开头可能残留的问候语行（Hi/Dear/Hello/Good day + 名字 + 可选逗号）
+                    # 使用 [^,\n] 防止跨行匹配，逗号可选，匹配后不保留原问候语
+                    body = re.sub(
+                        r'^(Hi|Dear|Hello|Good day)\s+[^,\n]{1,50}(?:,?)\s*\n*',
+                        '', body.lstrip(), flags=re.IGNORECASE
+                    ).strip()
                     body = f"{greeting}\n\n{body}"
+                    assembled_body = body
+                    # 防御性校验：确保组装后的邮件正文以问候语开头
+                    if not body.startswith(greeting):
+                        self._log(f"    ⚠ [问候语校验失败] {item.email_address}: 组装后body未以greeting开头. greeting='{greeting}', body前50字='{body[:50]}'")
+                else:
+                    # body 为空时，仅用问候语兜底
+                    body = greeting or 'Hi Team'
+                    assembled_body = body
+                    self._log(f"    ⚠ [正文为空] {item.email_address}: item.body为空，使用纯问候语兜底")
+
+                # 发送前记录问候语状态（用于排查问候语丢失问题）
+                self._log(f"    [问候语检查] {item.email_address}: greeting='{greeting}', 原始body前60字='{original_body[:60]}', 组装后前60字='{body[:60]}'")
 
                 success, message = self._sender.send_email(
                     item.email_address,
@@ -401,7 +426,7 @@ class SendQueueManager:
                 if success:
                     item.status = 'sent'
                     item.actual_send_at = datetime.now()
-                    self._log_to_email_logs(task, item, True, message)
+                    self._log_to_email_logs(task, item, True, message, assembled_body=assembled_body)
                     return True
                 else:
                     item.error_message = message
@@ -416,7 +441,7 @@ class SendQueueManager:
                     else:
                         item.status = 'failed'
                         item.actual_send_at = datetime.now()
-                        self._log_to_email_logs(task, item, False, message)
+                        self._log_to_email_logs(task, item, False, message, assembled_body=assembled_body)
                         return False
 
             except Exception as e:
@@ -432,16 +457,23 @@ class SendQueueManager:
                 else:
                     item.status = 'failed'
                     item.actual_send_at = datetime.now()
-                    self._log_to_email_logs(task, item, False, str(e))
+                    self._log_to_email_logs(task, item, False, str(e), assembled_body=assembled_body)
                     return False
 
         return False
 
-    def _log_to_email_logs(self, task, item, success, message):
-        """记录到 email_logs 表 - 统一通过 log_service 写入"""
+    def _log_to_email_logs(self, task, item, success, message, assembled_body=None):
+        """记录到 email_logs 表 - 统一通过 log_service 写入
+        
+        Args:
+            assembled_body: 组装后的完整邮件正文（含问候语），优先保存此内容
+        """
         try:
             # 判断来源：scheduled/batch 任务或手动任务
             source = 'scheduled' if any(k in task.task_id for k in ['scheduled', 'batch']) else 'manual'
+
+            # 优先保存组装后的完整邮件内容，让用户在发送记录中看到完整邮件
+            content_to_save = assembled_body if assembled_body else (item.body if item.body else '')
 
             log_id = log_email_send(
                 customer_id=item.customer_id,
@@ -449,7 +481,7 @@ class SendQueueManager:
                 task_id=task.task_id,
                 source=source,
                 subject=item.subject,
-                content=item.body if item.body else '',
+                content=content_to_save,
                 status='sent' if success else 'failed',
                 error_message=message if not success else None,
                 user_id=item.user_id,

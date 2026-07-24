@@ -82,45 +82,75 @@ def _extract_name_from_email(email_address: str) -> str:
     return ''
 
 
-def _make_greeting(email_type: str, contact_name: str, email_address: str, customer_name: str, user_id=None) -> str:
-    """生成邮件称呼。优先使用用户自定义问候语模板，否则按默认规则生成。"""
+def _is_valid_name(name: str) -> bool:
+    """检查名字是否有效（至少包含一个字母字符，不只是标点/数字/空白）"""
+    if not name or not name.strip():
+        return False
+    stripped = name.strip()
+    # 排除已知的无效占位符
+    if stripped.lower() in {'n/a', 'na', '-', '', 'team', 'unknown', 'none'}:
+        return False
+    # 必须包含至少一个字母字符（A-Z, a-z）
+    if not any(c.isalpha() for c in stripped):
+        return False
+    return True
+
+
+def _extract_first_name(contact_name: str) -> str:
+    """从 contact_name 提取 first_name，带有效性校验"""
+    if not _is_valid_name(contact_name):
+        return ''
+    first = contact_name.strip().split()[0].strip()
+    # 再次校验 first_name 本身也包含字母
+    return first if any(c.isalpha() for c in first) else ''
+
+
+def _make_greeting(email_type: str, contact_name: str, email_address: str, customer_name: str, user_id=None, greeting_template: str = None) -> str:
+    """生成邮件称呼。优先使用指定模板，其次随机获取用户模板，最后按默认规则生成。"""
     import re
 
-    # 优先查询用户自定义问候语模板
+    # 防御：customer_name 为 None 时兜底
+    safe_customer_name = (customer_name or 'Valued').strip()
+
+    # 提取有效的 first_name（若无效则回退到公司名）
+    first_name = _extract_first_name(contact_name)
+    has_valid_name = bool(first_name)
+
+    # 清理公司名（通用逻辑，供模板替换使用）
+    clean = re.sub(r'\s+(INC\.?|LLC\.?|Ltd\.?|PTY\.?|GMBH\.?|SA\.?|CORP\.?|CORPORATION\.?|LIMITED\.?|CO\.?)$', '', safe_customer_name, flags=re.IGNORECASE)
+    clean = clean.replace('team', '').replace('Team', '').strip()
+    clean = ' '.join(clean.split())
+    clean = clean.title() if clean else 'Valued'
+
+    # 优先使用传入的指定模板
+    if greeting_template:
+        text = greeting_template
+        text = text.replace('{first_name}', first_name)
+        text = text.replace('{company_name}', clean)
+        text = text.replace('{team}', 'Team' if email_type != 'personal' or not has_valid_name else '')
+        text_stripped = text.strip().rstrip(',').strip()
+        if text_stripped and text_stripped.lower() not in ('hi', 'hello', 'dear', 'good day'):
+            return text
+
+    # 其次查询用户自定义问候语模板（随机）
     if user_id:
         try:
             from database.email_template_models import get_random_template
             tpl = get_random_template(user_id, 'greeting')
             if tpl:
                 text = tpl['template_text']
-                # 清理 contact_name
-                name = (contact_name or '').strip()
-                has_valid_name = name and name.lower() not in ('', 'n/a', 'unknown', 'none')
-                first_name = name.split()[0].title() if has_valid_name and ' ' in name else (name.title() if has_valid_name else '')
-                # 清理公司名
-                clean = re.sub(r'\s+(INC\.?|LLC\.?|Ltd\.?|PTY\.?|GMBH\.?|SA\.?|CORP\.?|CORPORATION\.?|LIMITED\.?|CO\.?)$', '', customer_name, flags=re.IGNORECASE)
-                clean = clean.replace('team', '').replace('Team', '').strip()
-                clean = ' '.join(clean.split())
-                clean = clean.title() if clean else 'Valued'
-                # 替换占位符
                 text = text.replace('{first_name}', first_name)
                 text = text.replace('{company_name}', clean)
                 text = text.replace('{team}', 'Team' if email_type != 'personal' or not has_valid_name else '')
-                return text
+                text_stripped = text.strip().rstrip(',').strip()
+                if text_stripped and text_stripped.lower() not in ('hi', 'hello', 'dear', 'good day'):
+                    return text
         except Exception:
-            pass  # 回退到默认逻辑
+            pass
 
-    if email_type == 'personal':
-        # 个人邮箱：仅用已有联系人姓名
-        name = (contact_name or '').strip()
-        if name and name.lower() not in ('', 'n/a', 'unknown', 'none'):
-            first_name = name.split()[0] if ' ' in name else name
-            return f"Hi {first_name}"
-        # 个人邮箱但无联系人姓名 → 回退到公司名+Team
-    # 公共邮箱或无名字的个人邮箱 → 用公司名+Team
-    clean = customer_name.replace('INC.', '').replace('LLC', '').replace('Ltd.', '').replace('team', '').replace('Team', '').strip()
-    # 去掉多余空格
-    clean = ' '.join(clean.split())
+    if email_type == 'personal' and has_valid_name:
+        return f"Hi {first_name}"
+    # 公共邮箱或无有效名字的个人邮箱 → 用公司名+Team
     return f"Hi {clean} Team"
 
 _sender = EmailSender()
@@ -211,7 +241,8 @@ PUBLIC_PATHS = {
     '/login.html', '/login/google', '/auth/google/callback', '/logout', '/api/me',
     '/api/admin/users', '/api/admin/stats',
     '/api/admin/send-queue/status', '/api/admin/search-tasks/summary', '/api/admin/system/health',
-    '/api/invite/validate', '/login/invite'
+    '/api/invite/validate', '/login/invite',
+    '/api/health/greeting'  # 问候语健康检查（无需登录）
 }
 
 @app.before_request
@@ -2151,6 +2182,8 @@ def api_create_send_task():
         sender_material_id = data.get('sender_material_id')
         num_subjects = data.get('num_subjects', 0)
         language = data.get('language', 'en')  # 邮件语言，默认英语
+        selected_greeting_ids = data.get('selected_greeting_ids', [])
+        selected_opening_ids = data.get('selected_opening_ids', [])
 
         current_user_id = get_current_user_id()
         admin = is_admin()
@@ -2234,6 +2267,8 @@ def api_create_send_task():
                 'sender_material_id': sender_material_id,
                 'num_subjects': num_subjects,
                 'language': language,
+                'selected_greeting_ids': selected_greeting_ids,
+                'selected_opening_ids': selected_opening_ids,
                 'created_at': time.time()
             }
 
@@ -2300,7 +2335,28 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
         # 导入智能标题管理器
         from generators.subjects.manager import subject_manager
 
+        # 准备模板穿插分配
+        selected_greeting_ids = task.get('selected_greeting_ids', [])
+        selected_opening_ids = task.get('selected_opening_ids', [])
+
+        # 开场白模板按客户穿插分配
+        opening_templates_interleaved = []
+        if selected_opening_ids and user_id:
+            try:
+                from database.email_template_models import get_templates_by_ids, interleave_templates
+                opening_templates = get_templates_by_ids(user_id, 'opening', selected_opening_ids)
+                if opening_templates:
+                    opening_templates_interleaved = interleave_templates(opening_templates, total_customers)
+            except Exception as e:
+                print(f"[批量发送] 开场白模板穿插分配失败: {e}")
+
+        # 获取发信人信息用于替换变量
+        sender_info = {}
+        if hasattr(workflow, 'composer') and hasattr(workflow.composer, 'sender_info'):
+            sender_info = workflow.composer.sender_info or {}
+
         # 为每个客户执行完整邮件工作流
+        customer_idx = 0
         for customer_id, items in customer_groups.items():
             customer_name = items[0]['customer_name']
             website = items[0].get('website', '')
@@ -2323,12 +2379,25 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                     f'[{processed_customers}/{total_customers}] 生成邮件: {customer_name}'
                 )
 
+                # 获取当前客户的开场白模板
+                opening_template = None
+                if customer_idx < len(opening_templates_interleaved):
+                    tpl = opening_templates_interleaved[customer_idx]
+                    text = tpl['template_text']
+                    text = text.replace('{sender_name}', sender_info.get('sender_name', 'Travis'))
+                    text = text.replace('{job_title}', sender_info.get('job_title', 'Business Development Manager'))
+                    text = text.replace('{company_name}', sender_info.get('company_name', 'Niteo Solar'))
+                    text = text.replace('{customer_name}', customer_name)
+                    text = text.replace('{product}', 'your products')
+                    opening_template = text
+
                 selected_material_ids = task.get('selected_material_ids')
                 email_content = workflow.generate_email(
                     customer_name, website or '',
                     target_word_count=target_word_count,
                     selected_material_ids=selected_material_ids,
-                    language=language
+                    language=language,
+                    opening_template=opening_template
                 )
 
                 # Step 8: 智能标题生成与分配
@@ -2338,13 +2407,26 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                     f'[{processed_customers}/{total_customers}] 标题生成: {customer_name}'
                 )
 
+                # 为每个邮箱准备问候语模板穿插分配
+                greeting_templates_for_customer = []
+                if selected_greeting_ids and user_id:
+                    try:
+                        from database.email_template_models import get_templates_by_ids, interleave_templates
+                        greeting_templates = get_templates_by_ids(user_id, 'greeting', selected_greeting_ids)
+                        if greeting_templates:
+                            greeting_templates_for_customer = interleave_templates(greeting_templates, len(items))
+                    except Exception as e:
+                        print(f"[批量发送] 客户 {customer_name} 问候语模板穿插分配失败: {e}")
+
                 # 为每个邮箱构建基础邮件内容
                 email_items_for_customer = []
-                for item in items:
+                for idx, item in enumerate(items):
                     email_type = item['email_type']
                     contact_name = item.get('contact_name', '') or ''
                     email_addr = item.get('email_address', '') or ''
-                    greeting = _make_greeting(email_type, contact_name, email_addr, customer_name, user_id=user_id)
+                    # 使用穿插分配的问候语模板
+                    greeting_tpl = greeting_templates_for_customer[idx]['template_text'] if idx < len(greeting_templates_for_customer) else None
+                    greeting = _make_greeting(email_type, contact_name, email_addr, customer_name, user_id=user_id, greeting_template=greeting_tpl)
 
                     # 组装完整邮件正文
                     full_body = f"{greeting}\n\n{email_content['body']}\n\n{email_content['signature']}"
@@ -2359,6 +2441,8 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                         'body': full_body,
                         'customer_name': customer_name,
                     })
+
+                customer_idx += 1
 
                 # 使用智能标题管理器：生成多个标题并随机分配给各个邮箱
                 subjects, assigned_items = subject_manager.generate_and_assign(
@@ -3212,6 +3296,150 @@ def api_cooldown_release():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/health/greeting', methods=['GET'])
+def api_health_greeting():
+    """问候语生成健康检查 - 验证各种边界情况下问候语是否正确生成"""
+    test_cases = [
+        # (email_type, contact_name, customer_name, expected_should_contain_name)
+        ('personal', 'John Smith', 'ABC Solar', True),
+        ('personal', 'John', 'ABC Solar', True),
+        ('personal', '', 'ABC Solar', False),
+        ('personal', '   ', 'ABC Solar', False),
+        ('personal', 'n/a', 'ABC Solar', False),
+        ('personal', 'unknown', 'ABC Solar', False),
+        ('personal', ',', 'ABC Solar', False),       # 标点符号 → 应回退到公司名
+        ('personal', '.', 'ABC Solar', False),       # 标点符号 → 应回退到公司名
+        ('personal', '123', 'ABC Solar', False),     # 纯数字 → 应回退到公司名
+        ('public', '', 'ABC Solar', False),
+        ('public', 'John', 'ABC Solar', False),      # 公共邮箱不使用个人名字
+        ('public', '', '', False),                   # 空公司名 → 应使用 Valued
+        ('personal', 'Mary-Jane', 'ABC Solar', True),# 带连字符的名字
+    ]
+
+    results = []
+    all_pass = True
+    for email_type, contact_name, customer_name, should_have_name in test_cases:
+        greeting = _make_greeting(email_type, contact_name, 'test@example.com', customer_name, user_id=None)
+
+        # 检查是否包含有效的名字（不只是 "Hi " 或 "Hi Team"）
+        has_valid_name_in_greeting = _is_valid_name(
+            greeting.replace('Hi ', '').replace('Hello ', '').replace('Good day ', '').replace('Greetings ', '').replace('Team', '').replace(',', '').strip()
+        ) if 'Team' not in greeting else False
+
+        # 更精确的校验：问候语不应出现 "Hi ," "Hello ," 等名字缺失的情况
+        bad_patterns = ['hi ,', 'hello ,', 'good day ,', 'greetings ,', 'hi  ,', 'hello  ,']
+        is_bad = any(p in greeting.lower() for p in bad_patterns)
+
+        passed = not is_bad
+        if should_have_name and not has_valid_name_in_greeting:
+            passed = False
+
+        if not passed:
+            all_pass = False
+
+        results.append({
+            'email_type': email_type,
+            'contact_name': repr(contact_name),
+            'customer_name': customer_name,
+            'greeting': greeting,
+            'should_have_name': should_have_name,
+            'has_name': has_valid_name_in_greeting,
+            'is_bad_pattern': is_bad,
+            'passed': passed
+        })
+
+    # 额外检查：_extract_first_name 辅助函数
+    first_name_tests = [
+        ('John', 'John'),
+        ('John Smith', 'John'),
+        ('', ''),
+        ('   ', ''),
+        (',', ''),
+        ('.', ''),
+        ('123', ''),
+        ('n/a', ''),
+        ('unknown', ''),
+        ('Mary-Jane', 'Mary-Jane'),
+    ]
+    fn_results = []
+    for input_name, expected in first_name_tests:
+        actual = _extract_first_name(input_name)
+        fn_passed = actual == expected
+        if not fn_passed:
+            all_pass = False
+        fn_results.append({
+            'input': repr(input_name),
+            'expected': expected,
+            'actual': actual,
+            'passed': fn_passed
+        })
+
+    # 额外检查：send_queue 问候语组装逻辑
+    assemble_tests = []
+    assemble_cases = [
+        # (body, greeting, expected_starts_with_greeting)
+        ("Hi Alice,\n\nThis is the body.", "Hi Alice", True),
+        ("Hi Alice\n\nThis is the body.", "Hi Alice", True),
+        ("Dear Bob,\n\nThis is the body.", "Dear Bob", True),
+        ("Hello Team,\n\nThis is the body.", "Hello Team", True),
+        ("This is the body without greeting.", "", True),  # greeting为空，应从body提取或兜底
+        ("This is the body without greeting.", "Hi Team", True),
+        ("", "Hi Team", True),  # body为空，用问候语兜底
+        ("Good day Carol,\n\nBody here.", "", True),  # greeting为空，从body提取
+    ]
+
+    for body, greeting, expected_has_greeting in assemble_cases:
+        import re
+        original_body = body
+        assembled = body
+        actual_greeting = greeting
+
+        if body:
+            # greeting 为空时先尝试从 body 开头提取已有问候语复用
+            if not actual_greeting:
+                m = re.match(r'^(Hi|Dear|Hello|Good day)\s+([^,\n]{1,50})(?:,?)', body.lstrip(), re.IGNORECASE)
+                if m:
+                    actual_greeting = m.group(0).strip().rstrip(',')
+                else:
+                    actual_greeting = 'Hi Team'
+            # 去除 body 开头可能残留的问候语行
+            body = re.sub(
+                r'^(Hi|Dear|Hello|Good day)\s+[^,\n]{1,50}(?:,?)\s*\n*',
+                '', body.lstrip(), flags=re.IGNORECASE
+            ).strip()
+            assembled = f"{actual_greeting}\n\n{body}" if body else actual_greeting
+        else:
+            assembled = actual_greeting or 'Hi Team'
+
+        has_greeting = bool(actual_greeting) and assembled.startswith(actual_greeting)
+        # 更精确的校验：不应出现 "Hi ," 等缺失名字的情况
+        bad_patterns = ['hi ,', 'hello ,', 'good day ,', 'dear ,', 'greetings ,']
+        is_bad = any(p in assembled.lower() for p in bad_patterns)
+        passed = has_greeting and not is_bad
+
+        if not passed:
+            all_pass = False
+
+        assemble_tests.append({
+            'original_body': original_body[:60],
+            'input_greeting': greeting,
+            'actual_greeting': actual_greeting,
+            'assembled': assembled[:80],
+            'has_greeting': has_greeting,
+            'is_bad_pattern': is_bad,
+            'passed': passed
+        })
+
+    return jsonify({
+        'status': 'healthy' if all_pass else 'unhealthy',
+        'all_passed': all_pass,
+        'greeting_tests': results,
+        'first_name_tests': fn_results,
+        'assemble_tests': assemble_tests,
+        'timestamp': datetime.now().isoformat()
+    })
+
+
 @app.route('/api/send/test', methods=['POST'])
 @require_ajax
 def api_send_test():
@@ -3225,6 +3453,8 @@ def api_send_test():
         sender_material_id = data.get('sender_material_id')
         language = data.get('language', 'en')  # 邮件语言，默认英语
         num_subjects = data.get('num_subjects', 0)  # 标题数量（0=自动）
+        selected_greeting_ids = data.get('selected_greeting_ids', [])
+        selected_opening_ids = data.get('selected_opening_ids', [])
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
@@ -3270,6 +3500,8 @@ def api_send_test():
                 'sender_material_id': sender_material_id,
                 'language': language,
                 'num_subjects': num_subjects,
+                'selected_greeting_ids': selected_greeting_ids,
+                'selected_opening_ids': selected_opening_ids,
                 'send_config': send_config,
                 'created_at': time.time()
             }
@@ -3432,12 +3664,34 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
 
         selected_material_ids = task.get('selected_material_ids')
         num_subjects = task.get('num_subjects', 0)  # 0 = 自动决定
+
+        # 处理选中的开场白模板（手动发送：单个客户，取第一个）
+        opening_template = None
+        selected_opening_ids = task.get('selected_opening_ids', [])
+        if selected_opening_ids and user_id:
+            try:
+                from database.email_template_models import get_templates_by_ids
+                opening_templates = get_templates_by_ids(user_id, 'opening', selected_opening_ids)
+                if opening_templates:
+                    tpl = opening_templates[0]
+                    text = tpl['template_text']
+                    sender_info = workflow.composer.sender_info if hasattr(workflow.composer, 'sender_info') else {}
+                    text = text.replace('{sender_name}', sender_info.get('sender_name', 'Travis'))
+                    text = text.replace('{job_title}', sender_info.get('job_title', 'Business Development Manager'))
+                    text = text.replace('{company_name}', sender_info.get('company_name', 'Niteo Solar'))
+                    text = text.replace('{customer_name}', customer_name)
+                    text = text.replace('{product}', 'your products')
+                    opening_template = text
+            except Exception as e:
+                print(f"[手动发送] 开场白模板处理失败: {e}")
+
         email_content = workflow.generate_email(
             customer_name, website or '',
             progress_callback=on_progress,
             target_word_count=task.get('target_word_count'),
             selected_material_ids=selected_material_ids,
-            language=language
+            language=language,
+            opening_template=opening_template
         )
 
         # 保存邮件预览（full_text 包含问候语+正文+签名）
@@ -3447,13 +3701,27 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
             'word_count': email_content.get('word_count', 0)
         }
 
+        # 准备问候语模板穿插分配
+        selected_greeting_ids = task.get('selected_greeting_ids', [])
+        greeting_templates_interleaved = []
+        if selected_greeting_ids and user_id:
+            try:
+                from database.email_template_models import get_templates_by_ids, interleave_templates
+                greeting_templates = get_templates_by_ids(user_id, 'greeting', selected_greeting_ids)
+                if greeting_templates:
+                    greeting_templates_interleaved = interleave_templates(greeting_templates, len(emails))
+            except Exception as e:
+                print(f"[手动发送] 问候语模板穿插分配失败: {e}")
+
         # 使用智能标题管理器：生成多个标题并随机分配给各个邮箱
         from generators.subjects.manager import subject_manager
         email_items_raw = []
-        for email_row in emails:
+        for idx, email_row in enumerate(emails):
             email_id, email_address, email_type, contact_name = email_row
             contact_name = contact_name or ''
-            greeting = _make_greeting(email_type, contact_name, email_address, customer_name, user_id=user_id)
+            # 如果有穿插分配的问候语模板，使用它；否则回退到随机获取
+            greeting_tpl = greeting_templates_interleaved[idx]['template_text'] if idx < len(greeting_templates_interleaved) else None
+            greeting = _make_greeting(email_type, contact_name, email_address, customer_name, user_id=user_id, greeting_template=greeting_tpl)
             email_items_raw.append({
                 'email_id': email_id,
                 'customer_id': customer_id,
@@ -3865,6 +4133,8 @@ def api_email_preview():
         selected_material_ids = data.get('selected_material_ids')
         sender_material_id = data.get('sender_material_id')
         language = data.get('language', 'en')  # 邮件语言，默认英语
+        selected_greeting_ids = data.get('selected_greeting_ids', [])
+        selected_opening_ids = data.get('selected_opening_ids', [])
 
         if not customer_id:
             return jsonify({'success': False, 'error': '缺少客户ID'}), 400
@@ -3902,6 +4172,8 @@ def api_email_preview():
                 'sender_material_id': sender_material_id,
                 'language': language,
                 'num_subjects': data.get('num_subjects', 0),
+                'selected_greeting_ids': selected_greeting_ids,
+                'selected_opening_ids': selected_opening_ids,
                 'created_at': time.time()
             }
 
@@ -3970,12 +4242,37 @@ def _do_generate_preview(task_id, customer_id, user_id=None, language='en'):
             _update_task_step(task_id, step_id, status)
 
         selected_material_ids = task.get('selected_material_ids')
+
+        # 处理选中的开场白模板（预览取第一个）
+        opening_template = None
+        selected_opening_ids = task.get('selected_opening_ids', [])
+        if selected_opening_ids and user_id:
+            try:
+                from database.email_template_models import get_templates_by_ids
+                opening_templates = get_templates_by_ids(user_id, 'opening', selected_opening_ids)
+                if opening_templates:
+                    tpl = opening_templates[0]
+                    text = tpl['template_text']
+                    # 获取发信人信息用于替换变量
+                    sender_info = {}
+                    if hasattr(workflow, 'composer') and hasattr(workflow.composer, 'sender_info'):
+                        sender_info = workflow.composer.sender_info or {}
+                    text = text.replace('{sender_name}', sender_info.get('sender_name', 'Travis'))
+                    text = text.replace('{job_title}', sender_info.get('job_title', 'Business Development Manager'))
+                    text = text.replace('{company_name}', sender_info.get('company_name', 'Niteo Solar'))
+                    text = text.replace('{customer_name}', customer_name)
+                    text = text.replace('{product}', 'your products')
+                    opening_template = text
+            except Exception as e:
+                print(f"[预览] 开场白模板处理失败: {e}")
+
         email_content = workflow.generate_email(
             customer_name, website or '',
             progress_callback=on_progress,
             target_word_count=task.get('target_word_count'),
             selected_material_ids=selected_material_ids,
-            language=language
+            language=language,
+            opening_template=opening_template
         )
 
         # 生成标题池（让用户在预览区看到所有将使用的标题）
