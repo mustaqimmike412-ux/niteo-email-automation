@@ -694,7 +694,8 @@ class EmailComposer:
     def compose(self, research_result: Dict, classification: Dict,
                 fabe_points: List[Dict], materials: Dict,
                 contact_name: str = None, email_type: str = 'public',
-                has_website: bool = True, target_word_count=None) -> Dict:
+                has_website: bool = True, target_word_count=None,
+                greeting_template: str = None) -> Dict:
         """
         生成完整开发信
 
@@ -703,6 +704,7 @@ class EmailComposer:
             email_type: 'personal'（个人邮箱，有名字）或 'public'（公共邮箱，无名字）
             has_website: 客户是否有网站信息，影响开篇措辞
             target_word_count: 目标字数范围 {'min': int, 'max': int}
+            greeting_template: 用户指定的问候语模板（已替换变量后的文本），传入时优先使用
         """
         if target_word_count is None:
             target_word_count = {'min': 140, 'max': 160}
@@ -719,8 +721,8 @@ class EmailComposer:
         # 生成主题
         subject = self._generate_subject(classification, fabe_points)
 
-        # 生成称呼（根据是否有名字）
-        greeting = self._generate_greeting(contact_name, customer_name, email_type)
+        # 生成称呼（根据是否有名字，优先使用指定模板）
+        greeting = self._generate_greeting(contact_name, customer_name, email_type, greeting_template=greeting_template)
 
         # 生成正文
         body = self._generate_body(research_result, classification, fabe_points, materials, has_website)
@@ -824,12 +826,13 @@ class EmailComposer:
         first = contact_name.strip().split()[0].strip()
         return first if any(c.isalpha() for c in first) else ''
 
-    def _generate_greeting(self, contact_name: str = None, customer_name: str = 'Team', email_type: str = 'public') -> str:
+    def _generate_greeting(self, contact_name: str = None, customer_name: str = 'Team', email_type: str = 'public', greeting_template: str = None) -> str:
         """
         生成称呼（多样化规则，避免模式化特征）
-        1. 优先使用用户自定义问候语模板（如有配置）
-        2. 公共邮箱 / 无具体联系人: 随机选择 "Hi/Hello/Greetings" + [对方公司名称] Team,
-        3. 有具体联系人姓名: 随机选择 "Hi/Hello/Good day" + [First Name],
+        1. 优先使用外部传入的指定问候语模板（用户选择）
+        2. 其次查询用户自定义问候语模板（随机）
+        3. 公共邮箱 / 无具体联系人: 随机选择 "Hi/Hello/Greetings" + [对方公司名称] Team,
+        4. 有具体联系人姓名: 随机选择 "Hi/Hello/Good day" + [First Name],
         """
         import re
         import random
@@ -841,28 +844,36 @@ class EmailComposer:
         first_name = self._extract_first_name(contact_name)
         has_valid_name = bool(first_name)
 
-        # 优先查询用户自定义问候语模板
+        # 辅助：清理公司名并替换模板变量
+        def _prepare_template(text: str) -> str:
+            clean_name = safe_customer_name
+            suffix_patterns = [
+                r'\s+INC\.?$', r'\s+LLC\.?$', r'\s+LTD\.?$', r'\s+PTY\.?$',
+                r'\s+GMBH\.?$', r'\s+SA\.?$', r'\s+CORP\.?$', r'\s+CORPORATION\.?$',
+                r'\s+LIMITED\.?$', r'\s+CO\.?$'
+            ]
+            for pattern in suffix_patterns:
+                clean_name = re.sub(pattern, '', clean_name, flags=re.IGNORECASE)
+            clean_name = clean_name.strip().title() if clean_name.strip() else 'Valued'
+            text = text.replace('{first_name}', first_name)
+            text = text.replace('{company_name}', clean_name)
+            text = text.replace('{team}', 'Team' if email_type != 'personal' or not has_valid_name else '')
+            return text
+
+        # 1. 优先使用外部传入的指定模板
+        if greeting_template:
+            text = _prepare_template(greeting_template)
+            text_stripped = text.strip().rstrip(',').strip()
+            if text_stripped and text_stripped.lower() not in ('hi', 'hello', 'dear', 'good day'):
+                return text
+
+        # 2. 其次查询用户自定义问候语模板（随机）
         if getattr(self, 'user_id', None):
             try:
                 from database.email_template_models import get_random_template
                 tpl = get_random_template(self.user_id, 'greeting')
                 if tpl:
-                    text = tpl['template_text']
-                    # 清理公司名
-                    clean_name = safe_customer_name
-                    suffix_patterns = [
-                        r'\s+INC\.?$', r'\s+LLC\.?$', r'\s+LTD\.?$', r'\s+PTY\.?$',
-                        r'\s+GMBH\.?$', r'\s+SA\.?$', r'\s+CORP\.?$', r'\s+CORPORATION\.?$',
-                        r'\s+LIMITED\.?$', r'\s+CO\.?$'
-                    ]
-                    for pattern in suffix_patterns:
-                        clean_name = re.sub(pattern, '', clean_name, flags=re.IGNORECASE)
-                    clean_name = clean_name.strip().title() if clean_name.strip() else 'Valued'
-                    # 替换占位符
-                    text = text.replace('{first_name}', first_name)
-                    text = text.replace('{company_name}', clean_name)
-                    text = text.replace('{team}', 'Team' if email_type != 'personal' or not has_valid_name else '')
-                    # 防御：模板替换后不能为空或只剩问候词
+                    text = _prepare_template(tpl['template_text'])
                     text_stripped = text.strip().rstrip(',').strip()
                     if text_stripped and text_stripped.lower() not in ('hi', 'hello', 'dear', 'good day'):
                         return text
@@ -1493,7 +1504,7 @@ class EmailWorkflow:
 
         return result
 
-    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None, selected_material_ids=None, skip_refine=False, skip_format=False, language='en', opening_template=None):
+    def _generate_with_llm(self, customer_name, website, progress_callback=None, target_word_count=None, selected_material_ids=None, skip_refine=False, skip_format=False, language='en', opening_template=None, greeting_template=None):
         """使用 DeepSeek V4 Pro 生成邮件（LLM 增强模式）
 
         Args:
@@ -1505,6 +1516,8 @@ class EmailWorkflow:
               - dict: {'min': int, 'max': int}（兼容旧前端）
             selected_material_ids: 用户手动选中的素材ID列表
             language: 邮件语言 (en/fr/de)
+            opening_template: 用户指定的开场白模板（已替换变量后的文本）
+            greeting_template: 用户指定的问候语模板（已替换变量后的文本）
         """
         # 统一格式：int → 范围自动计算（容差±10）；dict → 直接使用；None → 默认150
         if target_word_count is None:
@@ -1748,10 +1761,11 @@ class EmailWorkflow:
             print(f"  ⚠ LLM 邮件生成失败: {llm_email['error']}，回退到规则引擎")
             email = self.composer.compose(research_result, classification, fabe_points, materials,
                                           contact_name=contact_name_for_email, email_type=email_type,
-                                          has_website=has_website, target_word_count=target_word_count)
+                                          has_website=has_website, target_word_count=target_word_count,
+                                          greeting_template=greeting_template)
         else:
             print(f"  ✓ LLM 邮件生成成功")
-            greeting = self.composer._generate_greeting(contact_name_for_email, customer_name, email_type)
+            greeting = self.composer._generate_greeting(contact_name_for_email, customer_name, email_type, greeting_template=greeting_template)
             signature = self.composer._generate_signature()
             # LLM 返回的 body 包含 greeting 和 signature，需要剥离，只保留纯正文
             llm_body = llm_email['body']
@@ -2161,7 +2175,8 @@ class EmailWorkflow:
                         selected_material_ids: list = None,
                         skip_refine=False, skip_format=False,
                         language: str = 'en',
-                        opening_template: str = None) -> Dict:
+                        opening_template: str = None,
+                        greeting_template: str = None) -> Dict:
         """
         一键生成开发信
 
@@ -2173,6 +2188,7 @@ class EmailWorkflow:
             selected_material_ids: 用户手动选中的素材ID列表
             language: 邮件语言 (en/fr/de)，默认英语
             opening_template: 用户指定的开场白模板（已替换变量后的文本），传入时优先使用
+            greeting_template: 用户指定的问候语模板（已替换变量后的文本），传入时优先使用
 
         Returns:
             包含主题、正文、HTML的完整邮件字典
@@ -2180,7 +2196,7 @@ class EmailWorkflow:
         has_website = bool(website and website.strip() and website.strip().startswith('http'))
 
         # 所有模式都使用 LLM 生成（不再区分模板/LLM 模式）
-        return self._generate_with_llm(customer_name, website, progress_callback, target_word_count, selected_material_ids, skip_refine=skip_refine, skip_format=skip_format, language=language, opening_template=opening_template)
+        return self._generate_with_llm(customer_name, website, progress_callback, target_word_count, selected_material_ids, skip_refine=skip_refine, skip_format=skip_format, language=language, opening_template=opening_template, greeting_template=greeting_template)
 
 
 if __name__ == '__main__':

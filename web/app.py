@@ -2391,23 +2391,7 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                     text = text.replace('{product}', 'your products')
                     opening_template = text
 
-                selected_material_ids = task.get('selected_material_ids')
-                email_content = workflow.generate_email(
-                    customer_name, website or '',
-                    target_word_count=target_word_count,
-                    selected_material_ids=selected_material_ids,
-                    language=language,
-                    opening_template=opening_template
-                )
-
-                # Step 8: 智能标题生成与分配
-                update_task_progress(
-                    'subjects',
-                    base_progress + 40,
-                    f'[{processed_customers}/{total_customers}] 标题生成: {customer_name}'
-                )
-
-                # 为每个邮箱准备问候语模板穿插分配
+                # 为每个邮箱准备问候语模板穿插分配（提前到邮件生成之前）
                 greeting_templates_for_customer = []
                 if selected_greeting_ids and user_id:
                     try:
@@ -2417,6 +2401,27 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                             greeting_templates_for_customer = interleave_templates(greeting_templates, len(items))
                     except Exception as e:
                         print(f"[批量发送] 客户 {customer_name} 问候语模板穿插分配失败: {e}")
+
+                selected_material_ids = task.get('selected_material_ids')
+                # 批量发送时，问候语模板取第一个用于邮件生成阶段的预览显示
+                preview_greeting_template = None
+                if greeting_templates_for_customer:
+                    preview_greeting_template = greeting_templates_for_customer[0]['template_text']
+                email_content = workflow.generate_email(
+                    customer_name, website or '',
+                    target_word_count=target_word_count,
+                    selected_material_ids=selected_material_ids,
+                    language=language,
+                    opening_template=opening_template,
+                    greeting_template=preview_greeting_template
+                )
+
+                # Step 8: 智能标题生成与分配
+                update_task_progress(
+                    'subjects',
+                    base_progress + 40,
+                    f'[{processed_customers}/{total_customers}] 标题生成: {customer_name}'
+                )
 
                 # 为每个邮箱构建基础邮件内容
                 email_items_for_customer = []
@@ -3685,23 +3690,7 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
             except Exception as e:
                 print(f"[手动发送] 开场白模板处理失败: {e}")
 
-        email_content = workflow.generate_email(
-            customer_name, website or '',
-            progress_callback=on_progress,
-            target_word_count=task.get('target_word_count'),
-            selected_material_ids=selected_material_ids,
-            language=language,
-            opening_template=opening_template
-        )
-
-        # 保存邮件预览（full_text 包含问候语+正文+签名）
-        task['email_preview'] = {
-            'subject': email_content['subject'],
-            'body': email_content.get('full_text', email_content['body']),
-            'word_count': email_content.get('word_count', 0)
-        }
-
-        # 准备问候语模板穿插分配
+        # 准备问候语模板穿插分配（提前到邮件生成之前）
         selected_greeting_ids = task.get('selected_greeting_ids', [])
         greeting_templates_interleaved = []
         if selected_greeting_ids and user_id:
@@ -3712,6 +3701,28 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
                     greeting_templates_interleaved = interleave_templates(greeting_templates, len(emails))
             except Exception as e:
                 print(f"[手动发送] 问候语模板穿插分配失败: {e}")
+
+        # 取第一个问候语模板用于邮件生成阶段的预览显示
+        preview_greeting_template = None
+        if greeting_templates_interleaved:
+            preview_greeting_template = greeting_templates_interleaved[0]['template_text']
+
+        email_content = workflow.generate_email(
+            customer_name, website or '',
+            progress_callback=on_progress,
+            target_word_count=task.get('target_word_count'),
+            selected_material_ids=selected_material_ids,
+            language=language,
+            opening_template=opening_template,
+            greeting_template=preview_greeting_template
+        )
+
+        # 保存邮件预览（full_text 包含问候语+正文+签名）
+        task['email_preview'] = {
+            'subject': email_content['subject'],
+            'body': email_content.get('full_text', email_content['body']),
+            'word_count': email_content.get('word_count', 0)
+        }
 
         # 使用智能标题管理器：生成多个标题并随机分配给各个邮箱
         from generators.subjects.manager import subject_manager
@@ -4266,13 +4277,27 @@ def _do_generate_preview(task_id, customer_id, user_id=None, language='en'):
             except Exception as e:
                 print(f"[预览] 开场白模板处理失败: {e}")
 
+        # 处理选中的问候语模板（预览取第一个）
+        greeting_template = None
+        selected_greeting_ids = task.get('selected_greeting_ids', [])
+        if selected_greeting_ids and user_id:
+            try:
+                from database.email_template_models import get_templates_by_ids
+                greeting_templates = get_templates_by_ids(user_id, 'greeting', selected_greeting_ids)
+                if greeting_templates:
+                    tpl = greeting_templates[0]
+                    greeting_template = tpl['template_text']
+            except Exception as e:
+                print(f"[预览] 问候语模板处理失败: {e}")
+
         email_content = workflow.generate_email(
             customer_name, website or '',
             progress_callback=on_progress,
             target_word_count=task.get('target_word_count'),
             selected_material_ids=selected_material_ids,
             language=language,
-            opening_template=opening_template
+            opening_template=opening_template,
+            greeting_template=greeting_template
         )
 
         # 生成标题池（让用户在预览区看到所有将使用的标题）
