@@ -6851,11 +6851,11 @@
 
     async function loadEmailTemplates(type) {
         const res = await api(`/api/email-templates?type=${type}`);
-        if (!res || !res.success) return;
+        if (!res) return;
         const container = document.getElementById(type + '-templates-list');
         if (!container) return;
         container.innerHTML = '';
-        (res.data || []).forEach(tpl => {
+        (res || []).forEach(tpl => {
             const row = document.createElement('div');
             row.style.cssText = 'display:flex;gap:6px;align-items:center';
             row.innerHTML = `
@@ -6872,11 +6872,11 @@
 
     async function loadEmailTemplateSelectors(type) {
         const res = await api(`/api/email-templates?type=${type}`);
-        if (!res || !res.success) return;
+        if (!res) return;
         const container = document.getElementById(type + '-templates-selector');
         if (!container) return;
         container.innerHTML = '';
-        const items = res.data || [];
+        const items = res || [];
         if (items.length === 0) {
             container.innerHTML = '<div style="font-size:0.72rem;color:var(--text-3)">暂无模板，请先在下方的模板管理中添加。</div>';
             return;
@@ -6919,11 +6919,11 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: type, template_text: defaults[type] })
         });
-        if (res && res.success) {
+        if (res) {
             loadEmailTemplates(type);
             toast('已添加模板', 'ok');
         } else {
-            toast(res?.error || '添加失败', 'err');
+            toast('添加失败', 'err');
         }
     }
 
@@ -6933,7 +6933,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ template_text: text.trim(), is_active: isActive })
         });
-        if (res && res.success) toast('已更新', 'ok');
+        if (res) toast('已更新', 'ok');
     }
 
     async function toggleTemplateActive(id, newState, type) {
@@ -6942,7 +6942,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ is_active: newState })
         });
-        if (res && res.success) {
+        if (res) {
             loadEmailTemplates(type);
         }
     }
@@ -6950,7 +6950,7 @@
     async function deleteEmailTemplate(id, type) {
         if (!confirm('确定删除此模板吗？')) return;
         const res = await api(`/api/email-templates/${id}`, { method: 'DELETE' });
-        if (res && res.success) {
+        if (res) {
             loadEmailTemplates(type);
             toast('已删除', 'ok');
         }
