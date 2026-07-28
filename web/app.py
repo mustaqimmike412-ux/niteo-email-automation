@@ -2391,22 +2391,58 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                     text = text.replace('{product}', 'your products')
                     opening_template = text
 
-                # 为每个邮箱准备问候语模板穿插分配（提前到邮件生成之前）
-                greeting_templates_for_customer = []
+                # 为每个邮箱准备问候语模板穿插分配（按个人/公司邮箱分别分配）
+                greeting_templates_for_customer = []  # 每个元素对应一个邮箱的问候语模板
                 if selected_greeting_ids and user_id:
                     try:
                         from database.email_template_models import get_templates_by_ids, interleave_templates
-                        greeting_templates = get_templates_by_ids(user_id, 'greeting', selected_greeting_ids)
-                        if greeting_templates:
-                            greeting_templates_for_customer = interleave_templates(greeting_templates, len(items))
+                        all_greeting_templates = get_templates_by_ids(user_id, 'greeting', selected_greeting_ids)
+                        if all_greeting_templates:
+                            # 按分类分组
+                            personal_tpls = [t for t in all_greeting_templates if t.get('greeting_category') == 'personal' or not t.get('greeting_category')]
+                            company_tpls = [t for t in all_greeting_templates if t.get('greeting_category') == 'company']
+                            # 分别统计个人邮箱和公共邮箱数量
+                            personal_emails = [it for it in items if it.get('email_type') == 'personal']
+                            public_emails = [it for it in items if it.get('email_type') != 'personal']
+                            # 分别穿插分配
+                            personal_assigned = interleave_templates(personal_tpls, len(personal_emails)) if personal_tpls else []
+                            company_assigned = interleave_templates(company_tpls, len(public_emails)) if company_tpls else []
+                            # 按原始顺序合并回 items 的顺序
+                            p_idx = 0
+                            c_idx = 0
+                            for item in items:
+                                if item.get('email_type') == 'personal':
+                                    if p_idx < len(personal_assigned):
+                                        greeting_templates_for_customer.append(personal_assigned[p_idx])
+                                        p_idx += 1
+                                    else:
+                                        # 没有个人模板时回退到公司模板或空
+                                        if c_idx < len(company_assigned):
+                                            greeting_templates_for_customer.append(company_assigned[c_idx])
+                                            c_idx += 1
+                                        else:
+                                            greeting_templates_for_customer.append(None)
+                                else:
+                                    if c_idx < len(company_assigned):
+                                        greeting_templates_for_customer.append(company_assigned[c_idx])
+                                        c_idx += 1
+                                    else:
+                                        # 没有公司模板时回退到个人模板或空
+                                        if p_idx < len(personal_assigned):
+                                            greeting_templates_for_customer.append(personal_assigned[p_idx])
+                                            p_idx += 1
+                                        else:
+                                            greeting_templates_for_customer.append(None)
                     except Exception as e:
                         print(f"[批量发送] 客户 {customer_name} 问候语模板穿插分配失败: {e}")
 
                 selected_material_ids = task.get('selected_material_ids')
-                # 批量发送时，问候语模板取第一个用于邮件生成阶段的预览显示
+                # 批量发送时，问候语模板取第一个非空的用于邮件生成阶段的预览显示
                 preview_greeting_template = None
-                if greeting_templates_for_customer:
-                    preview_greeting_template = greeting_templates_for_customer[0]['template_text']
+                for tpl in greeting_templates_for_customer:
+                    if tpl:
+                        preview_greeting_template = tpl['template_text']
+                        break
                 email_content = workflow.generate_email(
                     customer_name, website or '',
                     target_word_count=target_word_count,
@@ -2430,8 +2466,9 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                     contact_name = item.get('contact_name', '') or ''
                     email_addr = item.get('email_address', '') or ''
                     # 使用穿插分配的问候语模板
-                    greeting_tpl = greeting_templates_for_customer[idx]['template_text'] if idx < len(greeting_templates_for_customer) else None
-                    greeting = _make_greeting(email_type, contact_name, email_addr, customer_name, user_id=user_id, greeting_template=greeting_tpl)
+                    greeting_tpl = greeting_templates_for_customer[idx] if idx < len(greeting_templates_for_customer) else None
+                    greeting_tpl_text = greeting_tpl['template_text'] if greeting_tpl else None
+                    greeting = _make_greeting(email_type, contact_name, email_addr, customer_name, user_id=user_id, greeting_template=greeting_tpl_text)
 
                     # 组装完整邮件正文
                     full_body = f"{greeting}\n\n{email_content['body']}\n\n{email_content['signature']}"
@@ -3690,22 +3727,57 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
             except Exception as e:
                 print(f"[手动发送] 开场白模板处理失败: {e}")
 
-        # 准备问候语模板穿插分配（提前到邮件生成之前）
+        # 准备问候语模板穿插分配（按个人/公司邮箱分别分配）
         selected_greeting_ids = task.get('selected_greeting_ids', [])
-        greeting_templates_interleaved = []
+        greeting_templates_interleaved = []  # 每个元素对应一个邮箱的问候语模板（可能为None）
         if selected_greeting_ids and user_id:
             try:
                 from database.email_template_models import get_templates_by_ids, interleave_templates
-                greeting_templates = get_templates_by_ids(user_id, 'greeting', selected_greeting_ids)
-                if greeting_templates:
-                    greeting_templates_interleaved = interleave_templates(greeting_templates, len(emails))
+                all_greeting_templates = get_templates_by_ids(user_id, 'greeting', selected_greeting_ids)
+                if all_greeting_templates:
+                    # 按分类分组
+                    personal_tpls = [t for t in all_greeting_templates if t.get('greeting_category') == 'personal' or not t.get('greeting_category')]
+                    company_tpls = [t for t in all_greeting_templates if t.get('greeting_category') == 'company']
+                    # 分别统计个人邮箱和公共邮箱
+                    personal_emails = [e for e in emails if e[2] == 'personal']
+                    public_emails = [e for e in emails if e[2] != 'personal']
+                    # 分别穿插分配
+                    personal_assigned = interleave_templates(personal_tpls, len(personal_emails)) if personal_tpls else []
+                    company_assigned = interleave_templates(company_tpls, len(public_emails)) if company_tpls else []
+                    # 按原始顺序合并
+                    p_idx = 0
+                    c_idx = 0
+                    for email_row in emails:
+                        email_type = email_row[2]
+                        if email_type == 'personal':
+                            if p_idx < len(personal_assigned):
+                                greeting_templates_interleaved.append(personal_assigned[p_idx])
+                                p_idx += 1
+                            else:
+                                if c_idx < len(company_assigned):
+                                    greeting_templates_interleaved.append(company_assigned[c_idx])
+                                    c_idx += 1
+                                else:
+                                    greeting_templates_interleaved.append(None)
+                        else:
+                            if c_idx < len(company_assigned):
+                                greeting_templates_interleaved.append(company_assigned[c_idx])
+                                c_idx += 1
+                            else:
+                                if p_idx < len(personal_assigned):
+                                    greeting_templates_interleaved.append(personal_assigned[p_idx])
+                                    p_idx += 1
+                                else:
+                                    greeting_templates_interleaved.append(None)
             except Exception as e:
                 print(f"[手动发送] 问候语模板穿插分配失败: {e}")
 
-        # 取第一个问候语模板用于邮件生成阶段的预览显示
+        # 取第一个非空的问候语模板用于邮件生成阶段的预览显示
         preview_greeting_template = None
-        if greeting_templates_interleaved:
-            preview_greeting_template = greeting_templates_interleaved[0]['template_text']
+        for tpl in greeting_templates_interleaved:
+            if tpl:
+                preview_greeting_template = tpl['template_text']
+                break
 
         email_content = workflow.generate_email(
             customer_name, website or '',
@@ -3731,7 +3803,8 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
             email_id, email_address, email_type, contact_name = email_row
             contact_name = contact_name or ''
             # 如果有穿插分配的问候语模板，使用它；否则回退到随机获取
-            greeting_tpl = greeting_templates_interleaved[idx]['template_text'] if idx < len(greeting_templates_interleaved) else None
+            tpl_obj = greeting_templates_interleaved[idx] if idx < len(greeting_templates_interleaved) else None
+            greeting_tpl = tpl_obj['template_text'] if tpl_obj else None
             greeting = _make_greeting(email_type, contact_name, email_address, customer_name, user_id=user_id, greeting_template=greeting_tpl)
             email_items_raw.append({
                 'email_id': email_id,
@@ -4277,7 +4350,7 @@ def _do_generate_preview(task_id, customer_id, user_id=None, language='en'):
             except Exception as e:
                 print(f"[预览] 开场白模板处理失败: {e}")
 
-        # 处理选中的问候语模板（预览取第一个）
+        # 处理选中的问候语模板（预览取第一个非空的）
         greeting_template = None
         selected_greeting_ids = task.get('selected_greeting_ids', [])
         if selected_greeting_ids and user_id:
@@ -4285,8 +4358,12 @@ def _do_generate_preview(task_id, customer_id, user_id=None, language='en'):
                 from database.email_template_models import get_templates_by_ids
                 greeting_templates = get_templates_by_ids(user_id, 'greeting', selected_greeting_ids)
                 if greeting_templates:
-                    tpl = greeting_templates[0]
-                    greeting_template = tpl['template_text']
+                    # 优先取个人问候语，没有则取第一个
+                    personal_tpls = [t for t in greeting_templates if t.get('greeting_category') == 'personal' or not t.get('greeting_category')]
+                    if personal_tpls:
+                        greeting_template = personal_tpls[0]['template_text']
+                    else:
+                        greeting_template = greeting_templates[0]['template_text']
             except Exception as e:
                 print(f"[预览] 问候语模板处理失败: {e}")
 
@@ -6566,12 +6643,19 @@ def add_email_template_api():
     data = request.get_json() or {}
     template_type = data.get('type')
     template_text = data.get('template_text', '').strip()
+    greeting_category = data.get('greeting_category')
     if template_type not in ('greeting', 'opening'):
         return jsonify({'success': False, 'error': 'type 必须是 greeting 或 opening'}), 400
     if not template_text:
         return jsonify({'success': False, 'error': '模板内容不能为空'}), 400
+    if template_type == 'greeting' and greeting_category not in ('personal', 'company'):
+        # 自动推断分类
+        if '{company_name}' in template_text.lower():
+            greeting_category = 'company'
+        else:
+            greeting_category = 'personal'
     from database.email_template_models import add_template
-    tpl_id = add_template(get_current_user_id(), template_type, template_text)
+    tpl_id = add_template(get_current_user_id(), template_type, template_text, greeting_category=greeting_category if template_type == 'greeting' else None)
     return jsonify({'success': True, 'data': {'id': tpl_id}})
 
 
@@ -6583,12 +6667,15 @@ def update_email_template_api(template_id):
     data = request.get_json() or {}
     from database.email_template_models import update_template
     try:
-        update_template(
-            template_id,
-            template_text=data.get('template_text'),
-            is_active=data.get('is_active'),
-            user_id=get_current_user_id()
-        )
+        update_kwargs = {
+            'template_id': template_id,
+            'template_text': data.get('template_text'),
+            'is_active': data.get('is_active'),
+            'user_id': get_current_user_id()
+        }
+        if 'greeting_category' in data and data['greeting_category'] in ('personal', 'company'):
+            update_kwargs['greeting_category'] = data['greeting_category']
+        update_template(**update_kwargs)
         return jsonify({'success': True})
     except PermissionError as e:
         return jsonify({'success': False, 'error': str(e)}), 403

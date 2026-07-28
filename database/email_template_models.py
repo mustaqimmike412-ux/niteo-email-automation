@@ -17,82 +17,103 @@ def init_email_templates_table():
             user_id INTEGER NOT NULL,
             template_type TEXT NOT NULL CHECK(template_type IN ('greeting', 'opening')),
             template_text TEXT NOT NULL,
+            greeting_category TEXT CHECK(greeting_category IN ('personal', 'company')) DEFAULT NULL,
             is_active INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # 兼容旧数据库：如果列不存在则添加
+    try:
+        cursor.execute("SELECT greeting_category FROM user_email_templates LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE user_email_templates ADD COLUMN greeting_category TEXT CHECK(greeting_category IN ('personal', 'company')) DEFAULT NULL")
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_templates_user ON user_email_templates(user_id, template_type)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_templates_active ON user_email_templates(user_id, template_type, is_active)')
     conn.commit()
     conn.close()
 
 
-def get_templates(user_id, template_type, active_only=True):
+def get_templates(user_id, template_type, active_only=True, greeting_category=None):
     """获取某用户的指定类型模板列表
 
     Args:
         user_id: 用户ID
         template_type: 'greeting' 或 'opening'
         active_only: 是否只返回启用的模板
+        greeting_category: 问候语分类（'personal'/'company'），仅 template_type='greeting' 时有效
 
     Returns:
-        list[dict]: 模板列表，每个元素包含 id, template_text, is_active, created_at
+        list[dict]: 模板列表，每个元素包含 id, template_text, greeting_category, is_active, created_at
     """
     conn = get_connection()
     cursor = conn.cursor()
+    conditions = ['user_id = ?', 'template_type = ?']
+    params = [user_id, template_type]
     if active_only:
-        cursor.execute('''
-            SELECT id, template_text, is_active, created_at
-            FROM user_email_templates
-            WHERE user_id = ? AND template_type = ? AND is_active = 1
-            ORDER BY created_at
-        ''', (user_id, template_type))
-    else:
-        cursor.execute('''
-            SELECT id, template_text, is_active, created_at
-            FROM user_email_templates
-            WHERE user_id = ? AND template_type = ?
-            ORDER BY created_at
-        ''', (user_id, template_type))
+        conditions.append('is_active = 1')
+    if greeting_category and template_type == 'greeting':
+        conditions.append('greeting_category = ?')
+        params.append(greeting_category)
+    sql = f'''
+        SELECT id, template_text, greeting_category, is_active, created_at
+        FROM user_email_templates
+        WHERE {' AND '.join(conditions)}
+        ORDER BY created_at
+    '''
+    cursor.execute(sql, params)
     rows = cursor.fetchall()
     conn.close()
     return [
         {
             'id': r[0],
             'template_text': r[1],
-            'is_active': bool(r[2]),
-            'created_at': r[3]
+            'greeting_category': r[2],
+            'is_active': bool(r[3]),
+            'created_at': r[4]
         }
         for r in rows
     ]
 
 
-def add_template(user_id, template_type, template_text):
+def add_template(user_id, template_type, template_text, greeting_category=None):
     """新增模板
+
+    Args:
+        user_id: 用户ID
+        template_type: 'greeting' 或 'opening'
+        template_text: 模板文本
+        greeting_category: 问候语分类（'personal'/'company'），仅 template_type='greeting' 时有效
 
     Returns:
         int: 新模板ID
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO user_email_templates (user_id, template_type, template_text, is_active)
-        VALUES (?, ?, ?, 1)
-    ''', (user_id, template_type, template_text))
+    if template_type == 'greeting' and greeting_category:
+        cursor.execute('''
+            INSERT INTO user_email_templates (user_id, template_type, template_text, greeting_category, is_active)
+            VALUES (?, ?, ?, ?, 1)
+        ''', (user_id, template_type, template_text, greeting_category))
+    else:
+        cursor.execute('''
+            INSERT INTO user_email_templates (user_id, template_type, template_text, is_active)
+            VALUES (?, ?, ?, 1)
+        ''', (user_id, template_type, template_text))
     conn.commit()
     tpl_id = cursor.lastrowid
     conn.close()
     return tpl_id
 
 
-def update_template(template_id, template_text=None, is_active=None, user_id=None):
+def update_template(template_id, template_text=None, is_active=None, greeting_category=None, user_id=None):
     """更新模板
 
     Args:
         template_id: 模板ID
         template_text: 新文本（为None时不更新）
         is_active: 新状态（为None时不更新）
+        greeting_category: 问候语分类（为None时不更新）
         user_id: 如果传入，则校验模板属于该用户
     """
     conn = get_connection()
@@ -114,6 +135,9 @@ def update_template(template_id, template_text=None, is_active=None, user_id=Non
     if is_active is not None:
         fields.append('is_active = ?')
         params.append(1 if is_active else 0)
+    if greeting_category is not None:
+        fields.append('greeting_category = ?')
+        params.append(greeting_category)
     if fields:
         fields.append('updated_at = CURRENT_TIMESTAMP')
         sql = f"UPDATE user_email_templates SET {', '.join(fields)} WHERE id = ?"
@@ -178,7 +202,7 @@ def get_templates_by_ids(user_id, template_type, template_ids):
     cursor = conn.cursor()
     placeholders = ','.join('?' * len(template_ids))
     cursor.execute(f'''
-        SELECT id, template_text, is_active, created_at
+        SELECT id, template_text, greeting_category, is_active, created_at
         FROM user_email_templates
         WHERE user_id = ? AND template_type = ? AND is_active = 1 AND id IN ({placeholders})
         ORDER BY id
@@ -189,8 +213,9 @@ def get_templates_by_ids(user_id, template_type, template_ids):
         {
             'id': r[0],
             'template_text': r[1],
-            'is_active': bool(r[2]),
-            'created_at': r[3]
+            'greeting_category': r[2],
+            'is_active': bool(r[3]),
+            'created_at': r[4]
         }
         for r in rows
     ]
@@ -252,12 +277,12 @@ def interleave_templates(templates, count):
 # ==================== 默认模板数据 ====================
 
 DEFAULT_GREETING_TEMPLATES = [
-    "Hi {first_name},",
-    "Hello {first_name},",
-    "Good day {first_name},",
-    "Dear {first_name},",
-    "Hi {company_name} Team,",
-    "Hello {company_name} Team,",
+    {"text": "Hi {first_name},", "category": "personal"},
+    {"text": "Hello {first_name},", "category": "personal"},
+    {"text": "Good day {first_name},", "category": "personal"},
+    {"text": "Dear {first_name},", "category": "personal"},
+    {"text": "Hi {company_name} Team,", "category": "company"},
+    {"text": "Hello {company_name} Team,", "category": "company"},
 ]
 
 DEFAULT_OPENING_TEMPLATES = [
@@ -281,8 +306,8 @@ def init_default_templates(user_id):
     if count > 0:
         return  # 用户已有模板，跳过
 
-    for text in DEFAULT_GREETING_TEMPLATES:
-        add_template(user_id, 'greeting', text)
+    for tpl in DEFAULT_GREETING_TEMPLATES:
+        add_template(user_id, 'greeting', tpl['text'], greeting_category=tpl['category'])
 
     for text in DEFAULT_OPENING_TEMPLATES:
         add_template(user_id, 'opening', text)
