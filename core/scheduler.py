@@ -249,6 +249,8 @@ class EmailScheduler:
 
                         email_items = []
                         for e in emails:
+                            # 组装完整 body（greeting + body + signature），与批量/手动发送路径保持一致
+                            full_body = f"{result.get('greeting', '')}\n\n{result['body']}\n\n{result.get('signature', '')}"
                             email_items.append({
                                 'email_id': e[0],
                                 'customer_id': customer_id,
@@ -257,7 +259,7 @@ class EmailScheduler:
                                 'email_type': e[3],
                                 'subject': result['subject'],
                                 'greeting': result.get('greeting', ''),
-                                'body': result['body'],
+                                'body': full_body,
                             })
 
                         send_queue_manager.create_task(task_id, email_items, send_config)

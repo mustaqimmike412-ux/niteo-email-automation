@@ -381,40 +381,18 @@ class SendQueueManager:
                     self._sender = EmailSender(user_id=sender_user_id)
                     self._sender._user_id = sender_user_id
 
-                # 组装完整邮件正文：称呼 + 正文
-                # 去除 LLM 可能残留的 greeting 行，统一用正确的 per-recipient greeting
-                original_body = item.body or ''
-                greeting = item.greeting or ''
-                body = original_body
-                assembled_body = None
-                if body:
-                    import re
-                    # greeting 为空时先尝试从 body 开头提取已有问候语复用
-                    if not greeting:
-                        m = re.match(r'^(Hi|Dear|Hello|Good day)\s+([^,\n]{1,50})(?:,?)', body.lstrip(), re.IGNORECASE)
-                        if m:
-                            greeting = m.group(0).strip().rstrip(',')
-                        else:
-                            greeting = 'Hi Team'
-                    # 去除 body 开头可能残留的问候语行（Hi/Dear/Hello/Good day + 名字 + 可选逗号）
-                    # 使用 [^,\n] 防止跨行匹配，逗号可选，匹配后不保留原问候语
-                    body = re.sub(
-                        r'^(Hi|Dear|Hello|Good day)\s+[^,\n]{1,50}(?:,?)\s*\n*',
-                        '', body.lstrip(), flags=re.IGNORECASE
-                    ).strip()
-                    body = f"{greeting}\n\n{body}"
+                # item.body 已在 web/app.py 中完成组装（greeting + body + signature）
+                # send_queue 不再二次处理问候语，直接使用已组装好的 body
+                body = item.body or ''
+                assembled_body = body
+                if not body:
+                    # 兜底：body 为空时使用 greeting 或默认问候语
+                    body = getattr(item, 'greeting', '') or 'Hi Team'
                     assembled_body = body
-                    # 防御性校验：确保组装后的邮件正文以问候语开头
-                    if not body.startswith(greeting):
-                        self._log(f"    ⚠ [问候语校验失败] {item.email_address}: 组装后body未以greeting开头. greeting='{greeting}', body前50字='{body[:50]}'")
-                else:
-                    # body 为空时，仅用问候语兜底
-                    body = greeting or 'Hi Team'
-                    assembled_body = body
-                    self._log(f"    ⚠ [正文为空] {item.email_address}: item.body为空，使用纯问候语兜底")
+                    self._log(f"    ⚠ [正文为空] {item.email_address}: item.body为空，使用问候语兜底")
 
-                # 发送前记录问候语状态（用于排查问候语丢失问题）
-                self._log(f"    [问候语检查] {item.email_address}: greeting='{greeting}', 原始body前60字='{original_body[:60]}', 组装后前60字='{body[:60]}'")
+                # 发送前记录日志
+                self._log(f"    [发送] {item.email_address}: body前60字='{body[:60]}'")
 
                 success, message = self._sender.send_email(
                     item.email_address,

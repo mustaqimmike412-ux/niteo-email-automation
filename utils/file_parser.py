@@ -101,7 +101,7 @@ def parse_emails(email_text):
         for email in emails_in_field:
             email = email.strip()
             if email_pattern.match(email):
-                email_type = _detect_email_type(email)
+                email_type = _detect_email_type(email, name)
                 results.append((email, email_type, name, title))
 
     # 模式2: xxx@xxx.com=Name, Title
@@ -116,7 +116,7 @@ def parse_emails(email_text):
         else:
             name = info
             title = None
-        email_type = _detect_email_type(email)
+        email_type = _detect_email_type(email, name)
         results.append((email, email_type, name, title))
 
     # 模式3: Name\nxxx@xxx.com (多行格式) — 放宽正则，允许中间含额外单词
@@ -126,7 +126,7 @@ def parse_emails(email_text):
         line2 = lines[i + 1].strip()
         # 匹配 "First Last" 或 "First Middle Last" 或 "Tessa Bosche I Petromax"
         if re.match(r'^[A-Z][a-z]+(?:\s+[A-Za-z]+)+$', line1) and email_pattern.match(line2):
-            email_type = _detect_email_type(line2)
+            email_type = _detect_email_type(line2, line1)
             results.append((line2, email_type, line1, None))
 
     # 模式5: Name（职位）\nemail — 中文括号标注职位
@@ -135,7 +135,7 @@ def parse_emails(email_text):
         name = m.group(1).strip()
         title = m.group(2).strip()
         email = m.group(3).strip()
-        email_type = _detect_email_type(email)
+        email_type = _detect_email_type(email, name)
         results.append((email, email_type, name, title))
 
     # 模式6: Name Title=email — 等号前是姓名+职位（反转格式）
@@ -151,7 +151,7 @@ def parse_emails(email_text):
         else:
             name = name_part
             title = None
-        email_type = _detect_email_type(email)
+        email_type = _detect_email_type(email, name)
         results.append((email, email_type, name, title))
 
     # 模式7: "Name" <email> 或 Name <email> — RFC 5322 标准格式
@@ -162,7 +162,7 @@ def parse_emails(email_text):
         # 清理姓名中的转义字符
         name = re.sub(r'\\(.)', r'\1', name)
         if name and not re.match(r'^[a-zA-Z0-9._%+-]+$', name):  # 排除纯邮箱前缀
-            email_type = _detect_email_type(email)
+            email_type = _detect_email_type(email, name)
             results.append((email, email_type, name, None))
 
     # 模式8: 缩写姓名 X. Surname 或 X Surname\nemail
@@ -170,7 +170,7 @@ def parse_emails(email_text):
         line1 = lines[i].strip()
         line2 = lines[i + 1].strip()
         if re.match(r'^[A-Z]\.?\s+[A-Za-z]+$', line1) and email_pattern.match(line2):
-            email_type = _detect_email_type(line2)
+            email_type = _detect_email_type(line2, line1)
             results.append((line2, email_type, line1, None))
 
     # 模式9: Name\nTitle\nemail 三行格式
@@ -182,7 +182,7 @@ def parse_emails(email_text):
            email_pattern.match(line3) and \
            not email_pattern.match(line2) and \
            not re.match(r'^[A-Z][a-z]+(?:\s+[A-Za-z]+)*$', line2):
-            email_type = _detect_email_type(line3)
+            email_type = _detect_email_type(line3, line1)
             results.append((line3, email_type, line1, line2))
 
     # 模式10: 简单邮箱列表（无姓名信息）
@@ -197,10 +197,17 @@ def parse_emails(email_text):
     return results
 
 
-def _detect_email_type(email):
-    """根据邮箱地址判断类型（使用新的邮箱分类器）"""
+def _detect_email_type(email, contact_name=None):
+    """根据邮箱地址和联系人姓名判断类型（使用邮箱分类器）
+
+    Args:
+        email: 邮箱地址
+        contact_name: 关联的联系人姓名（如果有）
+    Returns:
+        'personal' 或 'public'
+    """
     from utils.email_classifier import classify_email
-    email_type, _ = classify_email(email)
+    email_type, _ = classify_email(email, contact_name)
     return email_type
 
 
@@ -235,12 +242,10 @@ def parse_email_list(email_text):
         match = email_pattern.search(line)
         if match:
             email = match.group(0)
-            email_type = _detect_email_type(email)
             
-            # 从邮箱前缀推断姓名（使用新的邮箱分类器）
-            from utils.email_classifier import infer_name_from_prefix
-            prefix = email.split('@')[0]
-            contact_name = infer_name_from_prefix(prefix)
+            # 使用邮箱分类器一步完成分类和姓名推断
+            from utils.email_classifier import classify_email
+            email_type, contact_name = classify_email(email)
             
             results.append((email, email_type, contact_name, None))
     

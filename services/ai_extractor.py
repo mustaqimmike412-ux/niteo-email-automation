@@ -222,66 +222,25 @@ Analyze and classify this customer."""
         """
         智能识别邮箱类型
         Returns: 'personal' 或 'public'
+
+        核心逻辑：
+        - 有关联的联系人姓名 → personal（个人邮箱）
+        - 邮箱前缀能推断出姓名 → personal（个人邮箱）
+        - 公共关键词 → public
+        - 无法判断 → public
         """
         email = email.lower().strip()
         prefix = email.split('@')[0] if '@' in email else email
 
-        # 明显的公共邮箱关键词
-        public_keywords = [
-            'info', 'sales', 'support', 'contact', 'admin', 'hello', 'team',
-            'service', 'help', 'marketing', 'office', 'general', 'enquiries',
-            'inquiry', 'business', 'customerservice', 'feedback', 'hr',
-            'careers', 'jobs', 'press', 'media', 'partners', 'abuse',
-            'webmaster', 'postmaster', 'hostmaster', 'noc', 'security',
-            'billing', 'account', 'accounts', 'finance', 'legal', 'privacy'
-        ]
-
-        # 检查前缀是否匹配公共关键词
-        if prefix in public_keywords:
-            return 'public'
-
-        # 如果提供了联系人姓名，且邮箱前缀包含姓名信息，判定为个人邮箱
-        if contact_name and len(contact_name) > 2:
-            name_parts = contact_name.lower().split()
-            if len(name_parts) >= 2:
-                first, last = name_parts[0], name_parts[-1]
-                # 检查前缀是否包含姓名首字母或全名
-                if first in prefix or last in prefix:
-                    return 'personal'
-                # 检查首字母+姓氏格式
-                if prefix == f"{first[0]}{last}" or prefix == f"{first[0]}.{last}":
-                    return 'personal'
-
-        # 使用 AI 进行最终判断
-        system_prompt = """You are an email classification expert. Determine if an email address is personal or public.
-
-Rules:
-- "personal": Contains a person's name or initials (e.g., john.doe@, jsmith@, michael@)
-- "public": Generic role-based email (e.g., info@, sales@, support@, hello@)
-- Output ONLY: "personal" or "public" (no explanation)"""
-
-        user_prompt = f"""Email: {email}
-Contact Name (if known): {contact_name or 'Unknown'}
-
-Classify this email as "personal" or "public"."""
-
-        content, error = self.llm._call(
-            system_prompt, user_prompt,
-            max_tokens=50, temperature=0.1, label='detect_email_type'
-        )
-
-        if error or not content:
-            # 默认规则：如果包含点号且看起来像名字，判定为个人
-            if '.' in prefix and len(prefix) > 4:
-                parts = prefix.split('.')
-                if len(parts) == 2 and len(parts[0]) > 1 and len(parts[1]) > 1:
-                    return 'personal'
-            return 'public'
-
-        result = content.strip().lower()
-        if 'personal' in result:
+        # 1. 如果有有效的联系人姓名，直接判定为个人邮箱
+        from utils.email_classifier import _is_valid_name
+        if _is_valid_name(contact_name):
             return 'personal'
-        return 'public'
+
+        # 2. 使用规则分类器（已包含公共关键词检查和姓名推断）
+        from utils.email_classifier import classify_email
+        email_type, _ = classify_email(email, contact_name)
+        return email_type
 
     # ==================== 4. 数据清洗和标准化 ====================
 

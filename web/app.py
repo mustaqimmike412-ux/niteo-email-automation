@@ -1099,6 +1099,13 @@ def api_customers_import():
                         job_title = email_info.get('job_title')
                         source = email_info.get('source', 'import')
 
+                        # 核心校验：有关联联系人姓名的邮箱一定是个人邮箱
+                        # 防止上游解析逻辑未传姓名导致误判为公共邮箱
+                        if contact_name and contact_name.strip():
+                            from utils.email_classifier import _is_valid_name
+                            if _is_valid_name(contact_name):
+                                email_type = 'personal'
+
                         # 插入联系人
                         contact_id = None
                         if contact_name:
@@ -2339,14 +2346,15 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
         selected_greeting_ids = task.get('selected_greeting_ids', [])
         selected_opening_ids = task.get('selected_opening_ids', [])
 
-        # 开场白模板按客户穿插分配
+        # 开场白模板按总邮箱数穿插分配（确保每封邮件开场白不同）
+        total_emails = len(emails_to_send)
         opening_templates_interleaved = []
         if selected_opening_ids and user_id:
             try:
                 from database.email_template_models import get_templates_by_ids, interleave_templates
                 opening_templates = get_templates_by_ids(user_id, 'opening', selected_opening_ids)
                 if opening_templates:
-                    opening_templates_interleaved = interleave_templates(opening_templates, total_customers)
+                    opening_templates_interleaved = interleave_templates(opening_templates, total_emails)
             except Exception as e:
                 print(f"[批量发送] 开场白模板穿插分配失败: {e}")
 
@@ -2356,7 +2364,7 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
             sender_info = workflow.composer.sender_info or {}
 
         # 为每个客户执行完整邮件工作流
-        customer_idx = 0
+        email_idx_global = 0  # 全局邮箱索引，用于开场白穿插
         for customer_id, items in customer_groups.items():
             customer_name = items[0]['customer_name']
             website = items[0].get('website', '')
@@ -2378,18 +2386,6 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                     base_progress + 20,
                     f'[{processed_customers}/{total_customers}] 生成邮件: {customer_name}'
                 )
-
-                # 获取当前客户的开场白模板
-                opening_template = None
-                if customer_idx < len(opening_templates_interleaved):
-                    tpl = opening_templates_interleaved[customer_idx]
-                    text = tpl['template_text']
-                    text = text.replace('{sender_name}', sender_info.get('sender_name', 'Travis'))
-                    text = text.replace('{job_title}', sender_info.get('job_title', 'Business Development Manager'))
-                    text = text.replace('{company_name}', sender_info.get('company_name', 'Niteo Solar'))
-                    text = text.replace('{customer_name}', customer_name)
-                    text = text.replace('{product}', 'your products')
-                    opening_template = text
 
                 # 为每个邮箱准备问候语模板穿插分配（按个人/公司邮箱分别分配）
                 greeting_templates_for_customer = []  # 每个元素对应一个邮箱的问候语模板
@@ -2437,20 +2433,6 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                         print(f"[批量发送] 客户 {customer_name} 问候语模板穿插分配失败: {e}")
 
                 selected_material_ids = task.get('selected_material_ids')
-                # 批量发送时，问候语模板取第一个非空的用于邮件生成阶段的预览显示
-                preview_greeting_template = None
-                for tpl in greeting_templates_for_customer:
-                    if tpl:
-                        preview_greeting_template = tpl['template_text']
-                        break
-                email_content = workflow.generate_email(
-                    customer_name, website or '',
-                    target_word_count=target_word_count,
-                    selected_material_ids=selected_material_ids,
-                    language=language,
-                    opening_template=opening_template,
-                    greeting_template=preview_greeting_template
-                )
 
                 # Step 8: 智能标题生成与分配
                 update_task_progress(
@@ -2459,15 +2441,45 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                     f'[{processed_customers}/{total_customers}] 标题生成: {customer_name}'
                 )
 
-                # 为每个邮箱构建基础邮件内容
+                # 为每个邮箱单独生成邮件内容（不同开场白+问候语），确保穿插效果
                 email_items_for_customer = []
+                # 先生成第一封邮件作为基准（用于标题生成）
+                first_email_content = None
                 for idx, item in enumerate(items):
                     email_type = item['email_type']
                     contact_name = item.get('contact_name', '') or ''
                     email_addr = item.get('email_address', '') or ''
-                    # 使用穿插分配的问候语模板
+
+                    # 获取当前邮箱的开场白模板（按全局邮箱索引穿插）
+                    opening_template = None
+                    if email_idx_global < len(opening_templates_interleaved):
+                        tpl = opening_templates_interleaved[email_idx_global]
+                        text = tpl['template_text']
+                        text = text.replace('{sender_name}', sender_info.get('sender_name', 'Travis'))
+                        text = text.replace('{job_title}', sender_info.get('job_title', 'Business Development Manager'))
+                        text = text.replace('{company_name}', sender_info.get('company_name', 'Niteo Solar'))
+                        text = text.replace('{customer_name}', customer_name)
+                        text = text.replace('{product}', 'your products')
+                        opening_template = text
+
+                    # 获取当前邮箱的问候语模板
                     greeting_tpl = greeting_templates_for_customer[idx] if idx < len(greeting_templates_for_customer) else None
                     greeting_tpl_text = greeting_tpl['template_text'] if greeting_tpl else None
+
+                    # 为每个邮箱单独调用 LLM 生成邮件（不同开场白 → 不同邮件内容）
+                    email_content = workflow.generate_email(
+                        customer_name, website or '',
+                        target_word_count=target_word_count,
+                        selected_material_ids=selected_material_ids,
+                        language=language,
+                        opening_template=opening_template,
+                        greeting_template=greeting_tpl_text
+                    )
+
+                    if first_email_content is None:
+                        first_email_content = email_content
+
+                    # 使用穿插分配的问候语模板生成最终问候语
                     greeting = _make_greeting(email_type, contact_name, email_addr, customer_name, user_id=user_id, greeting_template=greeting_tpl_text)
 
                     # 组装完整邮件正文
@@ -2484,7 +2496,7 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                         'customer_name': customer_name,
                     })
 
-                customer_idx += 1
+                    email_idx_global += 1
 
                 # 使用智能标题管理器：生成多个标题并随机分配给各个邮箱
                 subjects, assigned_items = subject_manager.generate_and_assign(
@@ -2493,7 +2505,7 @@ def _do_batch_send(task_id, emails_to_send, send_config, target_word_count=None,
                     country=country,
                     industry='',
                     email_items=email_items_for_customer,
-                    email_body=email_content['body'],
+                    email_body=first_email_content['body'] if first_email_content else '',
                     num_subjects=num_subjects
                 )
 
@@ -3416,59 +3428,37 @@ def api_health_greeting():
             'passed': fn_passed
         })
 
-    # 额外检查：send_queue 问候语组装逻辑
+    # 额外检查：send_queue 邮件 body 完整性验证
+    # send_queue 不再二次处理问候语，body 应在 web/app.py 中完成组装
     assemble_tests = []
     assemble_cases = [
-        # (body, greeting, expected_starts_with_greeting)
-        ("Hi Alice,\n\nThis is the body.", "Hi Alice", True),
-        ("Hi Alice\n\nThis is the body.", "Hi Alice", True),
-        ("Dear Bob,\n\nThis is the body.", "Dear Bob", True),
-        ("Hello Team,\n\nThis is the body.", "Hello Team", True),
-        ("This is the body without greeting.", "", True),  # greeting为空，应从body提取或兜底
-        ("This is the body without greeting.", "Hi Team", True),
-        ("", "Hi Team", True),  # body为空，用问候语兜底
-        ("Good day Carol,\n\nBody here.", "", True),  # greeting为空，从body提取
+        # (assembled_body, greeting, expected_starts_with_greeting)
+        ("Greetings TestCorp Team,\n\nBody content here.\n\nBest regards,\nTravis", "Greetings TestCorp Team,", True),
+        ("Hello TestCorp Team,\n\nBody content here.\n\nBest regards,\nTravis", "Hello TestCorp Team,", True),
+        ("To the TestCorp Team,\n\nBody content here.\n\nBest regards,\nTravis", "To the TestCorp Team,", True),
+        ("Hi John,\n\nBody content here.\n\nBest regards,\nTravis", "Hi John", True),
+        ("Good day John,\n\nBody content here.\n\nBest regards,\nTravis", "Good day John", True),
+        ("Dear John,\n\nBody content here.\n\nBest regards,\nTravis", "Dear John", True),
+        ("", "Hi Team", False),  # body 为空 → 异常情况
     ]
 
     for body, greeting, expected_has_greeting in assemble_cases:
-        import re
-        original_body = body
-        assembled = body
-        actual_greeting = greeting
-
-        if body:
-            # greeting 为空时先尝试从 body 开头提取已有问候语复用
-            if not actual_greeting:
-                m = re.match(r'^(Hi|Dear|Hello|Good day)\s+([^,\n]{1,50})(?:,?)', body.lstrip(), re.IGNORECASE)
-                if m:
-                    actual_greeting = m.group(0).strip().rstrip(',')
-                else:
-                    actual_greeting = 'Hi Team'
-            # 去除 body 开头可能残留的问候语行
-            body = re.sub(
-                r'^(Hi|Dear|Hello|Good day)\s+[^,\n]{1,50}(?:,?)\s*\n*',
-                '', body.lstrip(), flags=re.IGNORECASE
-            ).strip()
-            assembled = f"{actual_greeting}\n\n{body}" if body else actual_greeting
-        else:
-            assembled = actual_greeting or 'Hi Team'
-
-        has_greeting = bool(actual_greeting) and assembled.startswith(actual_greeting)
-        # 更精确的校验：不应出现 "Hi ," 等缺失名字的情况
-        bad_patterns = ['hi ,', 'hello ,', 'good day ,', 'dear ,', 'greetings ,']
-        is_bad = any(p in assembled.lower() for p in bad_patterns)
-        passed = has_greeting and not is_bad
+        # send_queue 直接使用 item.body，不再二次处理
+        has_greeting = bool(body) and bool(greeting) and body.startswith(greeting)
+        # 检查是否有重复问候语
+        greeting_count = body.count(greeting) if greeting and body else 0
+        has_duplicate = greeting_count > 1
+        passed = has_greeting == expected_has_greeting and not has_duplicate
 
         if not passed:
             all_pass = False
 
         assemble_tests.append({
-            'original_body': original_body[:60],
-            'input_greeting': greeting,
-            'actual_greeting': actual_greeting,
-            'assembled': assembled[:80],
-            'has_greeting': has_greeting,
-            'is_bad_pattern': is_bad,
+            'body_preview': body[:80] if body else '(empty)',
+            'greeting': greeting,
+            'starts_with_greeting': has_greeting,
+            'greeting_count': greeting_count,
+            'has_duplicate': has_duplicate,
             'passed': passed
         })
 
@@ -3707,25 +3697,17 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
         selected_material_ids = task.get('selected_material_ids')
         num_subjects = task.get('num_subjects', 0)  # 0 = 自动决定
 
-        # 处理选中的开场白模板（手动发送：单个客户，取第一个）
-        opening_template = None
+        # 处理选中的开场白模板（手动发送：按邮箱穿插分配）
         selected_opening_ids = task.get('selected_opening_ids', [])
+        opening_templates_interleaved = []  # 每个元素对应一个邮箱的开场白模板
         if selected_opening_ids and user_id:
             try:
-                from database.email_template_models import get_templates_by_ids
+                from database.email_template_models import get_templates_by_ids, interleave_templates
                 opening_templates = get_templates_by_ids(user_id, 'opening', selected_opening_ids)
                 if opening_templates:
-                    tpl = opening_templates[0]
-                    text = tpl['template_text']
-                    sender_info = workflow.composer.sender_info if hasattr(workflow.composer, 'sender_info') else {}
-                    text = text.replace('{sender_name}', sender_info.get('sender_name', 'Travis'))
-                    text = text.replace('{job_title}', sender_info.get('job_title', 'Business Development Manager'))
-                    text = text.replace('{company_name}', sender_info.get('company_name', 'Niteo Solar'))
-                    text = text.replace('{customer_name}', customer_name)
-                    text = text.replace('{product}', 'your products')
-                    opening_template = text
+                    opening_templates_interleaved = interleave_templates(opening_templates, len(emails))
             except Exception as e:
-                print(f"[手动发送] 开场白模板处理失败: {e}")
+                print(f"[手动发送] 开场白模板穿插分配失败: {e}")
 
         # 准备问候语模板穿插分配（按个人/公司邮箱分别分配）
         selected_greeting_ids = task.get('selected_greeting_ids', [])
@@ -3772,48 +3754,79 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
             except Exception as e:
                 print(f"[手动发送] 问候语模板穿插分配失败: {e}")
 
-        # 取第一个非空的问候语模板用于邮件生成阶段的预览显示
-        preview_greeting_template = None
-        for tpl in greeting_templates_interleaved:
-            if tpl:
-                preview_greeting_template = tpl['template_text']
-                break
+        # 获取发信人信息用于替换变量
+        sender_info = {}
+        if hasattr(workflow, 'composer') and hasattr(workflow.composer, 'sender_info'):
+            sender_info = workflow.composer.sender_info or {}
 
-        email_content = workflow.generate_email(
-            customer_name, website or '',
-            progress_callback=on_progress,
-            target_word_count=task.get('target_word_count'),
-            selected_material_ids=selected_material_ids,
-            language=language,
-            opening_template=opening_template,
-            greeting_template=preview_greeting_template
-        )
-
-        # 保存邮件预览（full_text 包含问候语+正文+签名）
-        task['email_preview'] = {
-            'subject': email_content['subject'],
-            'body': email_content.get('full_text', email_content['body']),
-            'word_count': email_content.get('word_count', 0)
-        }
-
-        # 使用智能标题管理器：生成多个标题并随机分配给各个邮箱
-        from generators.subjects.manager import subject_manager
-        email_items_raw = []
+        # 为每个邮箱单独生成邮件内容（不同开场白+问候语），确保穿插效果
+        email_contents_per_mailbox = []  # 每个邮箱的邮件内容
+        first_email_content = None
         for idx, email_row in enumerate(emails):
             email_id, email_address, email_type, contact_name = email_row
             contact_name = contact_name or ''
-            # 如果有穿插分配的问候语模板，使用它；否则回退到随机获取
+
+            # 获取当前邮箱的开场白模板
+            opening_template = None
+            if idx < len(opening_templates_interleaved):
+                tpl = opening_templates_interleaved[idx]
+                text = tpl['template_text']
+                text = text.replace('{sender_name}', sender_info.get('sender_name', 'Travis'))
+                text = text.replace('{job_title}', sender_info.get('job_title', 'Business Development Manager'))
+                text = text.replace('{company_name}', sender_info.get('company_name', 'Niteo Solar'))
+                text = text.replace('{customer_name}', customer_name)
+                text = text.replace('{product}', 'your products')
+                opening_template = text
+
+            # 获取当前邮箱的问候语模板
             tpl_obj = greeting_templates_interleaved[idx] if idx < len(greeting_templates_interleaved) else None
-            greeting_tpl = tpl_obj['template_text'] if tpl_obj else None
-            greeting = _make_greeting(email_type, contact_name, email_address, customer_name, user_id=user_id, greeting_template=greeting_tpl)
-            email_items_raw.append({
+            greeting_tpl_text = tpl_obj['template_text'] if tpl_obj else None
+
+            # 为每个邮箱单独调用 LLM 生成邮件
+            email_content = workflow.generate_email(
+                customer_name, website or '',
+                progress_callback=on_progress,
+                target_word_count=task.get('target_word_count'),
+                selected_material_ids=selected_material_ids,
+                language=language,
+                opening_template=opening_template,
+                greeting_template=greeting_tpl_text
+            )
+
+            if first_email_content is None:
+                first_email_content = email_content
+
+            # 生成最终问候语
+            greeting = _make_greeting(email_type, contact_name, email_address, customer_name, user_id=user_id, greeting_template=greeting_tpl_text)
+
+            email_contents_per_mailbox.append({
                 'email_id': email_id,
-                'customer_id': customer_id,
                 'email_address': email_address,
                 'email_type': email_type,
                 'contact_name': contact_name,
                 'greeting': greeting,
+                'subject': email_content['subject'],
+                'body': f"{greeting}\n\n{email_content['body']}\n\n{email_content.get('signature', '')}",
+                'email_content': email_content,
             })
+
+        # 保存邮件预览（full_text 包含问候语+正文+签名）
+        task['email_preview'] = {
+            'subject': first_email_content['subject'] if first_email_content else '',
+            'body': first_email_content.get('full_text', first_email_content['body']) if first_email_content else '',
+            'word_count': first_email_content.get('word_count', 0) if first_email_content else 0
+        }
+
+        # 使用智能标题管理器：生成多个标题并随机分配给各个邮箱
+        from generators.subjects.manager import subject_manager
+        email_items_raw = [{
+            'email_id': ec['email_id'],
+            'customer_id': customer_id,
+            'email_address': ec['email_address'],
+            'email_type': ec['email_type'],
+            'contact_name': ec['contact_name'],
+            'greeting': ec['greeting'],
+        } for ec in email_contents_per_mailbox]
 
         if len(email_items_raw) > 1:
             # 优先使用预览阶段已生成的标题池，避免重复调用LLM导致不一致
@@ -3829,7 +3842,7 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
                 country=country,
                 industry='',
                 email_items=email_items_raw,
-                email_body=email_content['body'],
+                email_body=first_email_content['body'] if first_email_content else '',
                 num_subjects=num_subjects,
                 subjects=subjects_pool  # 传入预先生成的标题池
             )
@@ -3837,11 +3850,17 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
         else:
             # 只有一个邮箱，直接用workflow生成的标题
             assigned_items = email_items_raw.copy()
-            assigned_items[0]['subject'] = email_content['subject']
+            assigned_items[0]['subject'] = first_email_content['subject'] if first_email_content else ''
 
-        # 组装最终邮件项
+        # 组装最终邮件项（每个邮箱使用各自独立生成的 body）
         email_items = []
         for item in assigned_items:
+            # 找到对应邮箱的独立邮件内容
+            ec = None
+            for content in email_contents_per_mailbox:
+                if content['email_id'] == item['email_id']:
+                    ec = content
+                    break
             email_items.append({
                 'email_id': item['email_id'],
                 'customer_id': customer_id,
@@ -3849,8 +3868,8 @@ def _do_send_email(task_id, customer_id, email_addresses=None, user_id=None, lan
                 'email_type': item['email_type'],
                 'contact_name': item['contact_name'],
                 'greeting': item['greeting'],
-                'subject': item.get('subject', email_content['subject']),
-                'body': f"{item['greeting']}\n\n{email_content['body']}\n\n{email_content.get('signature', '')}",
+                'subject': item.get('subject', first_email_content['subject'] if first_email_content else ''),
+                'body': ec['body'] if ec else f"{item['greeting']}\n\n{first_email_content['body']}\n\n{first_email_content.get('signature', '')}" if first_email_content else '',
                 'user_id': current_user_id,
             })
 

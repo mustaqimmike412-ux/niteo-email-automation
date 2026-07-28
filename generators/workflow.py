@@ -1468,7 +1468,7 @@ class EmailWorkflow:
                 if greeting_end > 0:
                     break  # greeting 后的空行表示 greeting 结束
                 continue
-            if greeting_end == 0 and (stripped.startswith('Hi ') or stripped.startswith('Dear ') or stripped.startswith('Hello ')):
+            if greeting_end == 0 and (stripped.startswith('Hi ') or stripped.startswith('Dear ') or stripped.startswith('Hello ') or stripped.startswith('Good day ') or stripped.startswith('Greetings ') or stripped.startswith('To the ')):
                 greeting_end = i + 1
             elif greeting_end > 0:
                 # greeting 后的第一个非空非签名行是正文开始

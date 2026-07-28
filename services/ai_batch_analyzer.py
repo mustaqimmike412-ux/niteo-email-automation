@@ -17,6 +17,7 @@ from typing import List, Dict, Tuple, Optional
 from services.ai_extractor import AIExtractor
 from services.file_content_extractor import extract_from_file
 from utils.file_parser import parse_emails
+from utils.email_classifier import _is_valid_name
 
 
 class AIBatchAnalyzer:
@@ -785,12 +786,18 @@ Map these to standard fields. Output JSON only."""
                 title = self._clean_text(contact.get('job_title', ''))
 
                 # 检测邮箱类型
+                # 核心规则：如果有关联的联系人姓名，必须判定为 personal
+                # parse_emails 可能因为旧逻辑未传姓名导致误判，这里强制重新校验
                 email_type = contact.get('email_type', '')
-                if not email_type or email_type not in ('personal', 'public'):
+                if _is_valid_name(name):
+                    # 有有效姓名 → 一定是个人邮箱
+                    email_type = 'personal'
+                elif not email_type or email_type not in ('personal', 'public'):
+                    # email_type 缺失或非法时重新分类
                     if self.is_available():
                         email_type = self.extractor.detect_email_type(email, name)
                     else:
-                        email_type = self._rule_based_email_type(email)
+                        email_type = self._rule_based_email_type(email, name)
 
                 cleaned_contacts.append({
                     'contact_name': name,
@@ -830,10 +837,10 @@ Map these to standard fields. Output JSON only."""
             url = 'https://' + url
         return url
 
-    def _rule_based_email_type(self, email: str) -> str:
+    def _rule_based_email_type(self, email: str, contact_name: str = '') -> str:
         """基于规则的邮箱类型判断（使用新的邮箱分类器）"""
         from utils.email_classifier import classify_email
-        email_type, _ = classify_email(email)
+        email_type, _ = classify_email(email, contact_name)
         return email_type
 
     # ==================== 5. 导出结果 ====================

@@ -283,6 +283,8 @@ DEFAULT_GREETING_TEMPLATES = [
     {"text": "Dear {first_name},", "category": "personal"},
     {"text": "Hi {company_name} Team,", "category": "company"},
     {"text": "Hello {company_name} Team,", "category": "company"},
+    {"text": "Greetings {company_name} Team,", "category": "company"},
+    {"text": "To the {company_name} Team,", "category": "company"},
 ]
 
 DEFAULT_OPENING_TEMPLATES = [
